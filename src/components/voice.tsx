@@ -13,8 +13,6 @@ const SAMPLE_IMAGE = "/mnt/data/133f8f2f-9a21-4fe8-873d-ff4107430ab6.png";
 
 const sampleVoices: Voice[] = [
     { id: "1", name: "Alice", language: "English", gender: "Female", tags: ["Free", "With facemotion"], avatarUrl: SAMPLE_IMAGE },
-    { id: "2", name: "Anderson", language: "English", gender: "Female", tags: ["Free", "With facemotion"], avatarUrl: SAMPLE_IMAGE },
-    { id: "3", name: "Andrew", language: "English", gender: "Female", tags: ["Free", "With facemotion"], avatarUrl: SAMPLE_IMAGE },
     { id: "4", name: "Alisa", language: "English", gender: "Female", tags: ["Free", "With facemotion"], avatarUrl: SAMPLE_IMAGE },
 ];
 
@@ -31,7 +29,7 @@ export default function VoiceDashboard() {
                 <div className="flex">
                     {/* Sidebar */}
                     <aside className="w-24 bg-purple-900/10 backdrop-blur border-r border-purple-300 h-screen sticky top-0 flex flex-col items-center py-8 gap-8 shadow-inner">
-                        <div className="text-sm font-bold tracking-wide text-purple-700">Voxxy+</div>
+                        <div className="text-sm font-bold tracking-wide text-purple-700">Manju+</div>
                         <nav className="flex flex-col items-center gap-6 w-full">
                             <SidebarButton label="Home" />
                             <SidebarButton label="Voice" active />
