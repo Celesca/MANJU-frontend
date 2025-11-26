@@ -1,0 +1,4 @@
+please run command npm for frontend !!!
+npm install -D typescript @types/react @types/react-dom postcss autoprefixer tailwindcss
+npm i -D daisyui@latest
+npm install react@^18.3.1 react-dom@^18.3.1 react-router-dom@^6.25.1 @emotion/react@^11.11.4 @emotion/styled@^11.11.0 @mui/material@^5.16.4 antd@^5.29.1 flowbite@^2.3.0 flowbite-react@^0.10.1 animejs@^3.2.2 framer-motion@^11.3.19 gsap@^3.12.5 ogl@^1.0.11 three@^0.166.1 axios@^1.7.2 bcryptjs@^2.4.3 body-parser@^1.20.2 cors@^2.8.5 express@^4.19.2 jsonwebtoken@^9.0.2 mongoose@^8.5.1 multer@^1.4.5-lts.1 mysql2@^3.10.3 node-cron@^3.0.3 @tailwindcss/vite@^4.1.17 browser-image-compression@^2.0.2 cross-env@^7.0.3 lucide-react@^0.379.0 moment@^2.30.1 react-scroll@^1.9.0 react-scroll-to-top@^2.0.0 react-slick@^0.30.2 react-spinners@^0.13.8 react-transition-group@^4.4.5 slick-carousel@^1.8.1 sweetalert2@^11.12.2 swiper@^11.1.8
