@@ -1,6 +1,4 @@
-import React from 'react';
-
-const VoiceControls = ({ mode }) => {
+const VoiceControls = ({ mode }: { mode: string }) => {
     
     // ซ่อน controls หากไม่ใช่โหมด Text-to-Voice
     if (mode !== 'text-to-voice') {

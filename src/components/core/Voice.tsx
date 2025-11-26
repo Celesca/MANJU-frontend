@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 // สมมติว่ามีคอมโพเนนต์สำหรับ Input/Output, Voice Selection และ Tone Adjustment
 import VoiceInputOutput from '../VoiceInputOutput';
 import VoiceControls from '../VoiceControls';

@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import  { useState } from 'react';
 import { Mic, Type, Upload, Play, Download, StopCircle } from 'lucide-react';
 
-const VoiceInputOutput = ({ mode }) => {
+const VoiceInputOutput = ({ mode }: { mode: string }) => {
     const [text, setText] = useState('');
     const [isRecording, setIsRecording] = useState(false);
     

@@ -1,15 +1,17 @@
+'use client';
+
 import React, {
     Children,
     cloneElement,
     forwardRef,
     isValidElement,
-    ReactElement,
-    ReactNode,
-    RefObject,
     useEffect,
     useLayoutEffect, // Used for initial placement to prevent FOUC
     useMemo,
-    useRef
+    useRef,
+    type ReactNode, // FIX: Use type-only import for ReactNode
+    type RefObject, // FIX: Use type-only import for RefObject
+    type ReactElement // FIX: Import ReactElement type
 } from 'react';
 import gsap from 'gsap';
 
@@ -61,7 +63,8 @@ Card.displayName = 'Card';
 
 // --- Utility Functions ---
 
-type CardRef = RefObject<HTMLDivElement>;
+// FIX: CardRef must include 'null' as createRef is initialized with null
+type CardRef = RefObject<HTMLDivElement | null>; 
 
 /**
  * Calculates the 3D position (slot) for a card based on its index.
@@ -123,7 +126,10 @@ const CardSwap: React.FC<CardSwapProps> = ({
             returnDelay: 0.2
         }, [easing]);
 
+    // Use ReactElement type which is now imported
     const childArr = useMemo(() => Children.toArray(children).filter(isValidElement) as ReactElement<CardProps>[], [children]);
+    
+    // The type CardRef is now correct, so this is valid.
     const refs = useMemo<CardRef[]>(() => childArr.map(() => React.createRef<HTMLDivElement>()), [childArr.length]);
     
     // Store the order of card indices. Start with [0, 1, 2, ...]
@@ -238,11 +244,8 @@ const CardSwap: React.FC<CardSwapProps> = ({
 
             // Start the cycle
             intervalRef.current = window.setInterval(swap, delay);
-            // Run the first swap immediately after setup
-            // Note: The first swap already ran in useLayoutEffect, but this runs the *animated* swap.
-            // We can optionally call `swap()` here if we want the animation to start instantly.
-            // Keeping the original's call to `swap()` here:
-            swap();
+            // Run the first animated swap to start the loop
+            swap(); 
 
             // --- Hover Pause Logic ---
             if (pauseOnHover) {
@@ -300,8 +303,8 @@ const CardSwap: React.FC<CardSwapProps> = ({
             ref={container}
             // Tailwind classes for 3D context and responsive scaling
             className="absolute bottom-0 right-0 transform translate-x-[5%] translate-y-[20%] origin-bottom-right perspective-[900px] overflow-visible
-                       max-[768px]:translate-x-[25%] max-[768px]:translate-y-[25%] max-[768px]:scale-[0.75] 
-                       max-[480px]:translate-x-[25%] max-[480px]:translate-y-[25%] max-[480px]:scale-[0.55]"
+                        max-[768px]:translate-x-[25%] max-[768px]:translate-y-[25%] max-[768px]:scale-[0.75] 
+                        max-[480px]:translate-x-[25%] max-[480px]:translate-y-[25%] max-[480px]:scale-[0.55]"
             style={{ width, height }}
         >
             {rendered}

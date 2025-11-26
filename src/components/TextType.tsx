@@ -1,19 +1,23 @@
 'use client';
 
 import React, {
-  ElementType,
   useEffect,
   useRef,
   useState,
   useMemo,
   useCallback,
 } from 'react';
+import type { ElementType } from 'react';
 
-enum Phase {
-  Typing,
-  Pausing,
-  Deleting,
-}
+// --- FIX: Replaced Enum with Const Object and Type Alias ---
+const Phase = {
+  Typing: 'typing',
+  Pausing: 'pausing',
+  Deleting: 'deleting',
+} as const;
+
+type Phase = typeof Phase[keyof typeof Phase];
+// -----------------------------------------------------------
 
 interface TextTypeProps {
   text: string | string[];
@@ -80,7 +84,7 @@ const TextWelcome = ({
   // --- State ---
   const [displayedText, setDisplayedText] = useState('');
   const [currentTextIndex, setCurrentTextIndex] = useState(0);
-  const [phase, setPhase] = useState<Phase>(Phase.Typing);
+  const [phase, setPhase] = useState<Phase>(Phase.Typing); 
   const [isVisible, setIsVisible] = useState(!startOnVisible);
 
   const containerRef = useRef<HTMLElement>(null);
@@ -119,7 +123,7 @@ const TextWelcome = ({
   useEffect(() => {
     if (!isVisible) return;
 
-    let timeout: NodeJS.Timeout;
+    let timeout: ReturnType<typeof setTimeout>;
 
     // Get the full string we are currently processing
     const fullCurrentText = textArray[currentTextIndex];
@@ -149,14 +153,14 @@ const TextWelcome = ({
           const nextIndex = currentTextIndex + 1;
           
           if (nextIndex >= textArray.length) {
-             if (loop) {
-               setCurrentTextIndex(0);
-               setPhase(Phase.Typing);
-               if(onLoopComplete) onLoopComplete();
-             } else {
-               // Stop completely
-               return; 
-             }
+              if (loop) {
+                setCurrentTextIndex(0);
+                setPhase(Phase.Typing);
+                if(onLoopComplete) onLoopComplete();
+              } else {
+                // Stop completely
+                return; 
+              }
           } else {
             setCurrentTextIndex(nextIndex);
             setPhase(Phase.Typing);
@@ -192,7 +196,7 @@ const TextWelcome = ({
             setDisplayedText(targetText.slice(0, 1)); 
         }, initialDelay);
     } else {
-        timeout = setTimeout(handleTyping, delay);
+      timeout = setTimeout(handleTyping, delay);
     }
 
     return () => clearTimeout(timeout);
@@ -247,7 +251,7 @@ const TextWelcome = ({
       )}
 
       {/* Inject Keyframes for Cursor locally to avoid external CSS dependency */}
-      <style jsx>{`
+      <style>{`
         @keyframes blink {
           0%, 100% { opacity: 1; }
           50% { opacity: 0; }

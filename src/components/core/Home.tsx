@@ -5,7 +5,6 @@ import Navbar from "../Navbar";
 import TextWelcome from "../TextType";
 // 1. IMPORT Aurora component
 import Aurora from "../Backgound";
-import { User } from "lucide-react";
 import UserCardSwap from "../UserCardSwap";
 
 export default function Home() {

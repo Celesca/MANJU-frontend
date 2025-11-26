@@ -27,7 +27,7 @@ const base64ToArrayBuffer = (base64: string): ArrayBuffer => {
   return bytes.buffer;
 };
 
-const pcmToWav = (pcm16: Int16Array, sampleRate: number): Blob => {
+const pcmToWav = (_pcm16: Int16Array, _sampleRate: number): Blob => {
   const mockWavData = new Uint8Array([
     82, 73, 70, 70, 20, 0, 0, 0, 87, 65, 86, 69,
   ]);
