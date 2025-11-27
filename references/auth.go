@@ -6,31 +6,52 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"log"
+
 	"os"
+	"strings"
 	"time"
+
+	"manju/backend/config/database"
+	"manju/backend/repository"
 
 	"github.com/gofiber/fiber/v2"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	"gorm.io/datatypes"
 )
 
 var googleOAuthConfig *oauth2.Config
 
 func init() {
-	redirect := os.Getenv("OAUTH_REDIRECT_URL")
+	// Prefer REDIRECT_URI (from .env) for consistency with the project file,
+	// fall back to OAUTH_REDIRECT_URL, then to a sensible default.
+	redirect := strings.TrimSpace(os.Getenv("REDIRECT_URI"))
 	if redirect == "" {
-		redirect = "http://localhost:8080/api/auth/callback/google"
+		redirect = strings.TrimSpace(os.Getenv("OAUTH_REDIRECT_URL"))
 	}
+	if redirect == "" {
+		redirect = "http://localhost:8080/auth/callback/google"
+	}
+	clientID := strings.TrimSpace(os.Getenv("CLIENT_ID"))
+	clientSecret := strings.TrimSpace(os.Getenv("CLIENT_SECRET"))
 	googleOAuthConfig = &oauth2.Config{
 		RedirectURL:  redirect,
-		ClientID:     os.Getenv("CLIENT_ID"),
-		ClientSecret: os.Getenv("CLIENT_SECRET"),
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
 		Scopes: []string{
 			"https://www.googleapis.com/auth/userinfo.email",
 			"https://www.googleapis.com/auth/userinfo.profile",
 		},
 		Endpoint: google.Endpoint,
 	}
+	// Mask and log the client id and redirect for debugging (do not log secrets)
+	cid := os.Getenv("CLIENT_ID")
+	masked := cid
+	if len(cid) > 8 {
+		masked = cid[:4] + "..." + cid[len(cid)-4:]
+	}
+	log.Printf("OAuth CLIENT_ID=%s REDIRECT=%s", masked, redirect)
 }
 
 func generateState(c *fiber.Ctx) (string, error) {
@@ -38,7 +59,8 @@ func generateState(c *fiber.Ctx) (string, error) {
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	state := base64.URLEncoding.EncodeToString(b)
+	// use RawURLEncoding to avoid padding (=) and keep the cookie a bit shorter
+	state := base64.RawURLEncoding.EncodeToString(b)
 	c.Cookie(&fiber.Cookie{ // set a short-lived cookie to verify state
 		Name:    "oauthstate",
 		Value:   state,
@@ -50,11 +72,31 @@ func generateState(c *fiber.Ctx) (string, error) {
 
 // Login starts the OAuth2 flow and redirects the user to Google's consent screen.
 func Login(c *fiber.Ctx) error {
+	// Diagnostic logging: log request header and cookie size to help debug 431 errors
+	cookieHeader := c.Get("Cookie")
+	totalHeaderLen := 0
+	c.Request().Header.VisitAll(func(k, v []byte) {
+		totalHeaderLen += len(k) + len(v)
+	})
+	log.Printf("Auth Login request headers total bytes=%d cookieHeaderBytes=%d", totalHeaderLen, len(cookieHeader))
+
 	state, err := generateState(c)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).SendString("failed to generate oauth state")
 	}
-	url := googleOAuthConfig.AuthCodeURL(state, oauth2.AccessTypeOffline)
+	// Request offline access and ask for consent explicitly so Google returns a refresh_token
+	url := googleOAuthConfig.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"))
+	// Log the generated auth URL with client_id masked for diagnosis
+	// mask client_id value in the URL
+	maskedUrl := url
+	if cid := os.Getenv("CLIENT_ID"); cid != "" {
+		maskedCid := cid
+		if len(cid) > 8 {
+			maskedCid = cid[:4] + "..." + cid[len(cid)-4:]
+		}
+		maskedUrl = strings.ReplaceAll(maskedUrl, cid, maskedCid)
+	}
+	log.Printf("Auth URL: %s", maskedUrl)
 	return c.Redirect(url, fiber.StatusTemporaryRedirect)
 }
 
@@ -92,10 +134,83 @@ func Callback(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("failed to parse userinfo")
 	}
 
-	// At this point you would typically create or lookup the user in your DB
-	// and create a session/jwt. For now, return the Google user info + token.
-	return c.JSON(fiber.Map{
-		"user":  gu,
-		"token": token,
-	})
+	// Persist user (create if not exists)
+	email, _ := gu["email"].(string)
+	name, _ := gu["name"].(string)
+	infoBytes, _ := json.Marshal(gu)
+
+	userRepo := repository.New(database.Database)
+	user, err := userRepo.GetByEmail(email)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).SendString("db error")
+	}
+	if user == nil {
+		newUser := &repository.User{
+			Email:  email,
+			Name:   name,
+			Info:   datatypes.JSON(infoBytes),
+			Status: repository.StatusActive,
+		}
+		created, err := userRepo.Create(newUser)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).SendString("failed to create user")
+		}
+		user = created
+	}
+
+	// Create server-side session and persist refresh token if provided
+	sessionRepo := repository.NewSession(database.Database)
+	var expires *time.Time
+	if !token.Expiry.IsZero() {
+		t := token.Expiry
+		expires = &t
+	}
+	session := &repository.Session{
+		UserID:       user.ID,
+		RefreshToken: token.RefreshToken,
+		ExpiresAt:    expires,
+	}
+	createdSession, err := sessionRepo.Create(session)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).SendString("failed to create session")
+	}
+
+	// Set httpOnly session cookie (do not expose tokens in URL)
+	cookie := &fiber.Cookie{
+		Name:     "manju_session",
+		Value:    createdSession.ID.String(),
+		Expires:  time.Now().Add(7 * 24 * time.Hour),
+		HTTPOnly: true,
+		Secure:   false, // set true in production with HTTPS
+		Path:     "/",
+	}
+	c.Cookie(cookie)
+
+	// clear oauth state
+	c.ClearCookie("oauthstate")
+
+	frontend := strings.TrimSpace(os.Getenv("FRONTEND_URL"))
+	if frontend == "" {
+		frontend = "http://localhost:5173"
+	}
+	return c.Redirect(frontend, fiber.StatusTemporaryRedirect)
+}
+
+// Me returns the authenticated user's basic info based on session cookie
+func Me(c *fiber.Ctx) error {
+	sid := c.Cookies("manju_session")
+	if sid == "" {
+		return c.Status(fiber.StatusUnauthorized).SendString("unauthenticated")
+	}
+	sessionRepo := repository.NewSession(database.Database)
+	sess, err := sessionRepo.GetByID(sid)
+	if err != nil || sess == nil {
+		return c.Status(fiber.StatusUnauthorized).SendString("unauthenticated")
+	}
+	userRepo := repository.New(database.Database)
+	user, err := userRepo.GetByID(sess.UserID.String())
+	if err != nil || user == nil {
+		return c.Status(fiber.StatusUnauthorized).SendString("unauthenticated")
+	}
+	return c.JSON(fiber.Map{"id": user.ID, "email": user.Email, "name": user.Name})
 }
