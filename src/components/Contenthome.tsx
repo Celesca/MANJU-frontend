@@ -38,7 +38,7 @@ const ContentInputPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>("TEXT TO SPEECH");
 
   const [text, setText] = useState(
-    'In the ancient land of Eldoria...'
+    'Sometimes, I feel many people expect a lot from me, and I try to do as much as I can.'
   );
 
   const [isLoading, setIsLoading] = useState(false);

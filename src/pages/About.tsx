@@ -10,8 +10,7 @@ export default function About() {
     <div className="min-h-screen bg-gradient-to-r from-purple-700 via-indigo-700 to-blue-800 p-6">
       <h1 className="text-4xl font-bold mb-8 text-white text-center">About Us</h1>
       <p className="text-gray-200 mb-12 text-center max-w-xl mx-auto">
-        Welcome to our About pa
-        ge! Here you can describe your company, project, or yourself.
+        Welcome to our About page! Here you can describe your company, project, or yourself.
       </p>
 
       {/* Grid การ์ด 2x2 */}
