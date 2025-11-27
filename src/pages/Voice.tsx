@@ -1,7 +1,7 @@
 import { useState } from 'react';
 // สมมติว่ามีคอมโพเนนต์สำหรับ Input/Output, Voice Selection และ Tone Adjustment
-import VoiceInputOutput from '../VoiceInputOutput';
-import VoiceControls from '../VoiceControls';
+import VoiceInputOutput from '../components/VoiceInputOutput';
+import VoiceControls from '../components/VoiceControls';
 
 export default function VoiceStudio() {
     const [mode, setMode] = useState('text-to-voice'); // 'text-to-voice' หรือ 'voice-to-text'

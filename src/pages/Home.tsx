@@ -1,11 +1,11 @@
-import CardSwap, { Card } from "../ContentCard";
-import ContentInputPage from "../Contenthome";
-import GradientText from "../GradientText";
-import Navbar from "../Navbar";
-import TextWelcome from "../TextType";
+import CardSwap, { Card } from "../components/ContentCard";
+import ContentInputPage from "../components/Contenthome";
+import GradientText from "../components/GradientText";
+import Navbar from "../components/Navbar";
+import TextWelcome from "../components/TextType";
 // 1. IMPORT Aurora component
-import Aurora from "../Backgound";
-import UserCardSwap from "../UserCardSwap";
+import Aurora from "../components/Backgound";
+import UserCardSwap from "../components/UserCardSwap";
 
 export default function Home() {
   return (
