@@ -3,7 +3,6 @@ import { Routes, Route } from "react-router-dom";
 // Pages
 import Homepage from "./pages/Home";
 import About from "./pages/About";
-import LoginKaew from "./pages/LoginKaew";
 import VoiceStudio from "./pages/Voice";
 // import CallCenter from "./pages/VadComponent";
 import MyComponent from "./pages/vad";
@@ -16,7 +15,6 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Homepage />} />
       <Route path="/about" element={<About />} />
-      <Route path="/login/kaew" element={<LoginKaew />} />
       <Route path="/voice" element={
         <PrivateRoute>
           <VoiceStudio />
