@@ -118,9 +118,35 @@ export default function WorkflowCanvas({
     const node = nodes.find((n) => n.id === nodeId);
     if (!node) return;
 
-    // Calculate port position
-    const portX = portType === 'output' ? node.position.x + 180 : node.position.x;
-    const portY = node.position.y + 36;
+    // Find the port to get its position
+    const port = portType === 'output' 
+      ? node.outputs.find(p => p.id === portId)
+      : node.inputs.find(p => p.id === portId);
+    
+    const nodeWidth = 180;
+    const nodeHeight = 80; // approximate
+    let portX: number;
+    let portY: number;
+
+    if (port?.position === 'bottom') {
+      // Bottom ports (context inputs)
+      const bottomPorts = node.inputs.filter(p => p.position === 'bottom');
+      const portIndex = bottomPorts.findIndex(p => p.id === portId);
+      portX = node.position.x + 90 + portIndex * 40;
+      portY = node.position.y + nodeHeight + 6;
+    } else if (portType === 'output') {
+      // Right side outputs
+      const rightOutputs = node.outputs.filter(p => p.position !== 'bottom');
+      const portIndex = rightOutputs.findIndex(p => p.id === portId);
+      portX = node.position.x + nodeWidth + 6;
+      portY = node.position.y + 32 + portIndex * 28;
+    } else {
+      // Left side inputs
+      const leftInputs = node.inputs.filter(p => p.position !== 'bottom');
+      const portIndex = leftInputs.findIndex(p => p.id === portId);
+      portX = node.position.x - 6;
+      portY = node.position.y + 32 + portIndex * 28;
+    }
 
     setIsDrawingConnection(true);
     setConnectionStart({ nodeId, portId, portType, x: portX, y: portY });
@@ -198,21 +224,55 @@ export default function WorkflowCanvas({
 
   // Render connections as SVG paths
   const renderConnections = () => {
+    const nodeWidth = 180;
+    const nodeHeight = 80;
+    
     return connections.map((conn) => {
       const sourceNode = nodes.find((n) => n.id === conn.sourceNodeId);
       const targetNode = nodes.find((n) => n.id === conn.targetNodeId);
       
       if (!sourceNode || !targetNode) return null;
 
-      // Calculate connection points (simplified - output on right, input on left)
-      const sourceX = sourceNode.position.x + 200; // Node width
-      const sourceY = sourceNode.position.y + 40; // Center of node
-      const targetX = targetNode.position.x;
-      const targetY = targetNode.position.y + 40;
+      // Find source port index
+      const rightOutputs = sourceNode.outputs.filter(p => p.position !== 'bottom');
+      const sourcePortIndex = rightOutputs.findIndex(p => p.id === conn.sourcePortId);
+      
+      // Find target port
+      const targetPort = targetNode.inputs.find(p => p.id === conn.targetPortId);
+      const leftInputs = targetNode.inputs.filter(p => p.position !== 'bottom');
+      const bottomInputs = targetNode.inputs.filter(p => p.position === 'bottom');
+      const targetPortIndex = leftInputs.findIndex(p => p.id === conn.targetPortId);
+      const targetBottomIndex = bottomInputs.findIndex(p => p.id === conn.targetPortId);
+      
+      // Calculate source position (always right side for outputs)
+      const sourceX = sourceNode.position.x + nodeWidth + 6;
+      const sourceY = sourceNode.position.y + 32 + Math.max(0, sourcePortIndex) * 28;
+      
+      // Calculate target position
+      let targetX: number;
+      let targetY: number;
+      
+      if (targetPort?.position === 'bottom') {
+        // Bottom port
+        targetX = targetNode.position.x + 90 + targetBottomIndex * 40;
+        targetY = targetNode.position.y + nodeHeight + 6;
+      } else {
+        // Left side port
+        targetX = targetNode.position.x - 6;
+        targetY = targetNode.position.y + 32 + Math.max(0, targetPortIndex) * 28;
+      }
 
-      // Bezier curve control points
-      const midX = (sourceX + targetX) / 2;
-      const path = `M ${sourceX} ${sourceY} C ${midX} ${sourceY}, ${midX} ${targetY}, ${targetX} ${targetY}`;
+      // Bezier curve - adjust control points based on direction
+      let path: string;
+      if (targetPort?.position === 'bottom') {
+        // Curve from right to bottom
+        const midY = Math.max(sourceY, targetY + 50);
+        path = `M ${sourceX} ${sourceY} C ${sourceX + 50} ${sourceY}, ${targetX} ${midY}, ${targetX} ${targetY}`;
+      } else {
+        // Normal horizontal curve
+        const midX = (sourceX + targetX) / 2;
+        path = `M ${sourceX} ${sourceY} C ${midX} ${sourceY}, ${midX} ${targetY}, ${targetX} ${targetY}`;
+      }
 
       return (
         <path

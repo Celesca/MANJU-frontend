@@ -9,6 +9,7 @@ import {
   RAGDocumentConfigPanel,
   GoogleSheetsConfigPanel,
 } from '../components/workflow/config';
+import IfConditionConfigPanel from '../components/workflow/config/IfConditionConfigPanel';
 import type {
   WorkflowNode,
   Connection,
@@ -18,6 +19,7 @@ import type {
   AIModelData,
   RAGDocumentData,
   GoogleSheetsData,
+  IfConditionData,
 } from '../types/workflow';
 
 export default function ModelConfig() {
@@ -154,6 +156,14 @@ export default function ModelConfig() {
         return (
           <GoogleSheetsConfigPanel
             data={configPanelNode.data as GoogleSheetsData}
+            onSave={(data) => handleConfigSave(configPanelNode.id, data)}
+            onClose={() => setConfigPanelNode(null)}
+          />
+        );
+      case 'if-condition':
+        return (
+          <IfConditionConfigPanel
+            data={configPanelNode.data as IfConditionData}
             onSave={(data) => handleConfigSave(configPanelNode.id, data)}
             onClose={() => setConfigPanelNode(null)}
           />

@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Bot, FileText, Table, Mic, Volume2 } from 'lucide-react';
+import { Bot, FileText, Table, Mic, Volume2, GitBranch } from 'lucide-react';
 import type { NodeTemplate } from '../../types/workflow';
 import { nodeTemplates } from '../../types/nodeTemplates';
 
@@ -9,6 +9,7 @@ const iconComponents: Record<string, React.ReactNode> = {
   'file-text': <FileText className="w-5 h-5" />,
   table: <Table className="w-5 h-5" />,
   volume: <Volume2 className="w-5 h-5" />,
+  'git-branch': <GitBranch className="w-5 h-5" />,
 };
 
 const categoryColors: Record<string, { bg: string; text: string }> = {

@@ -13,7 +13,7 @@ export const nodeTemplates: NodeTemplate[] = [
       vadEnabled: true,
     },
     defaultInputs: [],
-    defaultOutputs: [{ id: 'audio-out', type: 'output', label: 'Audio' }],
+    defaultOutputs: [{ id: 'audio-out', type: 'output', position: 'right', label: 'Output' }],
   },
   {
     type: 'ai-model',
@@ -29,8 +29,11 @@ export const nodeTemplates: NodeTemplate[] = [
       maxTokens: 1024,
       apiKeyConfigured: false,
     },
-    defaultInputs: [{ id: 'text-in', type: 'input', label: 'Input' }],
-    defaultOutputs: [{ id: 'text-out', type: 'output', label: 'Response' }],
+    defaultInputs: [
+      { id: 'text-in', type: 'input', position: 'left', label: 'Input' },
+      { id: 'context-in', type: 'input', position: 'bottom', label: 'Context' },
+    ],
+    defaultOutputs: [{ id: 'text-out', type: 'output', position: 'right', label: 'Output' }],
   },
   {
     type: 'rag-documents',
@@ -44,8 +47,8 @@ export const nodeTemplates: NodeTemplate[] = [
       chunkOverlap: 50,
       embeddingModel: 'text-embedding-3-small',
     },
-    defaultInputs: [{ id: 'query-in', type: 'input', label: 'Query' }],
-    defaultOutputs: [{ id: 'context-out', type: 'output', label: 'Context' }],
+    defaultInputs: [{ id: 'query-in', type: 'input', position: 'left', label: 'Input' }],
+    defaultOutputs: [{ id: 'context-out', type: 'output', position: 'right', label: 'Output' }],
   },
   {
     type: 'google-sheets',
@@ -60,8 +63,8 @@ export const nodeTemplates: NodeTemplate[] = [
       credentials: false,
       syncMode: 'read',
     },
-    defaultInputs: [{ id: 'data-in', type: 'input', label: 'Data' }],
-    defaultOutputs: [{ id: 'data-out', type: 'output', label: 'Data' }],
+    defaultInputs: [{ id: 'data-in', type: 'input', position: 'left', label: 'Input' }],
+    defaultOutputs: [{ id: 'data-out', type: 'output', position: 'right', label: 'Output' }],
   },
   {
     type: 'voice-output',
@@ -74,7 +77,25 @@ export const nodeTemplates: NodeTemplate[] = [
       speed: 1.0,
       pitch: 1.0,
     },
-    defaultInputs: [{ id: 'text-in', type: 'input', label: 'Text' }],
+    defaultInputs: [{ id: 'text-in', type: 'input', position: 'left', label: 'Input' }],
     defaultOutputs: [],
+  },
+  {
+    type: 'if-condition',
+    label: 'If Condition',
+    description: 'Branch based on conditions',
+    icon: 'git-branch',
+    category: 'processing',
+    defaultData: {
+      conditionType: 'contains',
+      conditionValue: '',
+      caseSensitive: false,
+      customExpression: '',
+    },
+    defaultInputs: [{ id: 'value-in', type: 'input', position: 'left', label: 'Input' }],
+    defaultOutputs: [
+      { id: 'true-out', type: 'output', position: 'right', label: 'True' },
+      { id: 'false-out', type: 'output', position: 'right', label: 'False' },
+    ],
   },
 ];
