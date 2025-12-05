@@ -33,6 +33,11 @@ export default function WorkflowCanvas({
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   
+  // Node dragging state
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [dragNodeStart, setDragNodeStart] = useState({ x: 0, y: 0 });
+  
   // Connection drawing state
   const [isDrawingConnection, setIsDrawingConnection] = useState(false);
   const [connectionStart, setConnectionStart] = useState<{
@@ -88,15 +93,16 @@ export default function WorkflowCanvas({
     [onDrop, offset, zoom]
   );
 
-  // Handle node drag
-  const handleNodeDrag = (nodeId: string, dragOffset: { x: number; y: number }) => {
+  // Handle node drag start from WorkflowNode component
+  const handleNodeDragStart = (nodeId: string, e: React.MouseEvent) => {
     const node = nodes.find((n) => n.id === nodeId);
-    if (node) {
-      onNodeMove(nodeId, {
-        x: node.position.x + dragOffset.x / zoom,
-        y: node.position.y + dragOffset.y / zoom,
-      });
-    }
+    if (!node || !canvasRef.current) return;
+    
+    const rect = canvasRef.current.getBoundingClientRect();
+    setDraggingNodeId(nodeId);
+    setDragStart({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    setDragNodeStart({ x: node.position.x, y: node.position.y });
+    onNodeSelect(nodeId);
   };
 
   // Handle port click for connection drawing
@@ -121,12 +127,28 @@ export default function WorkflowCanvas({
     setConnectionEnd({ x: portX, y: portY });
   };
 
-  // Handle mouse move for connection drawing
+  // Handle mouse move for node dragging and connection drawing
   const handleCanvasMouseMove = (e: React.MouseEvent) => {
     if (isPanning) {
       setOffset({
         x: e.clientX - panStart.x,
         y: e.clientY - panStart.y,
+      });
+    }
+    
+    // Handle node dragging
+    if (draggingNodeId && canvasRef.current) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const currentX = e.clientX - rect.left;
+      const currentY = e.clientY - rect.top;
+      
+      // Calculate new position based on drag delta
+      const deltaX = (currentX - dragStart.x) / zoom;
+      const deltaY = (currentY - dragStart.y) / zoom;
+      
+      onNodeMove(draggingNodeId, {
+        x: dragNodeStart.x + deltaX,
+        y: dragNodeStart.y + deltaY,
       });
     }
     
@@ -139,9 +161,10 @@ export default function WorkflowCanvas({
     }
   };
 
-  // Handle mouse up for connection completion
+  // Handle mouse up for connection completion and node drag end
   const handleCanvasMouseUp = (e: React.MouseEvent) => {
     setIsPanning(false);
+    setDraggingNodeId(null);
     
     if (isDrawingConnection && connectionStart) {
       // Check if we dropped on a valid port
@@ -252,12 +275,13 @@ export default function WorkflowCanvas({
       {/* Canvas */}
       <div
         ref={canvasRef}
-        className={`w-full h-full ${isPanning ? 'cursor-grabbing' : isDrawingConnection ? 'cursor-crosshair' : 'cursor-default'}`}
+        className={`w-full h-full ${draggingNodeId ? 'cursor-grabbing' : isPanning ? 'cursor-grabbing' : isDrawingConnection ? 'cursor-crosshair' : 'cursor-default'}`}
         onMouseDown={handleMouseDown}
         onMouseMove={handleCanvasMouseMove}
         onMouseUp={handleCanvasMouseUp}
         onMouseLeave={() => {
           setIsPanning(false);
+          setDraggingNodeId(null);
           setIsDrawingConnection(false);
           setConnectionStart(null);
           setConnectionEnd(null);
@@ -309,8 +333,9 @@ export default function WorkflowCanvas({
               key={node.id}
               node={node}
               isSelected={selectedNodeId === node.id}
+              isDragging={draggingNodeId === node.id}
               onSelect={() => onNodeSelect(node.id)}
-              onDrag={(offset) => handleNodeDrag(node.id, offset)}
+              onDragStart={(e) => handleNodeDragStart(node.id, e)}
               onConfigure={() => onNodeConfigure(node.id)}
               onPortMouseDown={handlePortMouseDown}
             />

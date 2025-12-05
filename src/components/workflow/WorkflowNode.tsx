@@ -6,8 +6,9 @@ import type { WorkflowNode, NodeType } from '../../types/workflow';
 export interface WorkflowNodeProps {
   node: WorkflowNode;
   isSelected: boolean;
+  isDragging?: boolean;
   onSelect: () => void;
-  onDrag: (info: { x: number; y: number }) => void;
+  onDragStart: (e: React.MouseEvent) => void;
   onConfigure: () => void;
   onPortMouseDown?: (
     e: React.MouseEvent,
@@ -44,30 +45,39 @@ const nodeLabels: Record<NodeType, string> = {
 export default function WorkflowNodeComponent({
   node,
   isSelected,
+  isDragging = false,
   onSelect,
-  onDrag,
+  onDragStart,
   onConfigure,
   onPortMouseDown,
 }: WorkflowNodeProps) {
   const [isHovered, setIsHovered] = useState(false);
   const colors = nodeColors[node.type];
 
+  const handleMouseDown = (e: React.MouseEvent) => {
+    // Don't start drag if clicking on a port
+    const target = e.target as HTMLElement;
+    if (target.dataset?.portId) return;
+    
+    e.preventDefault();
+    e.stopPropagation();
+    onDragStart(e);
+  };
+
   return (
     <motion.div
-      className={`absolute cursor-move select-none ${colors.bg} ${colors.border} border-2 rounded-lg shadow-md min-w-[180px] ${
+      className={`absolute select-none ${colors.bg} ${colors.border} border-2 rounded-lg shadow-md min-w-[180px] ${
         isSelected ? 'ring-2 ring-purple-500 ring-offset-2' : ''
-      }`}
+      } ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
       style={{
         left: node.position.x,
         top: node.position.y,
-        zIndex: isSelected ? 20 : 10,
+        zIndex: isDragging ? 100 : isSelected ? 20 : 10,
       }}
       initial={{ scale: 0.8, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
-      whileHover={{ scale: 1.02 }}
-      drag
-      dragMomentum={false}
-      onDragEnd={(_, info) => onDrag({ x: info.offset.x, y: info.offset.y })}
+      whileHover={{ scale: isDragging ? 1 : 1.02 }}
+      onMouseDown={handleMouseDown}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onClick={(e) => {
