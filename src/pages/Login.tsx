@@ -1,6 +1,5 @@
 import Navbar from '../components/Navbar';
 import Aurora from '../components/Backgound';
-import React from 'react';
 
 // Backend-handled Google OAuth flow (matches auth.go routes)
 // The server exposes:
