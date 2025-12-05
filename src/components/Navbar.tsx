@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X, ChevronRight } from "lucide-react";
 
@@ -74,9 +75,12 @@ const Navbar = () => {
           {/* --- Right Actions --- */}
           <div className="hidden md:flex items-center gap-4">
             {/* ปรับสี Text ของ Log in */}
-            <button className={`text-sm font-medium ${buttonTextColor} ${hoverColor} px-4 py-2 transition-colors`}>
+            <Link
+              to="/login"
+              className={`text-sm font-medium ${buttonTextColor} ${hoverColor} px-4 py-2 transition-colors`}
+            >
               Log in
-            </button>
+            </Link>
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -122,9 +126,11 @@ const Navbar = () => {
               ))}
               <hr className="border-slate-200 my-2" />
               <div className="flex flex-col gap-3">
-                <button className="w-full py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg transition-colors">
-                  Log in
-                </button>
+                <Link to="/login" className="w-full">
+                  <button className="w-full py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg transition-colors">
+                    Log in
+                  </button>
+                </Link>
                 <button className="w-full py-3 bg-gradient-to-r from-purple-600 to-sky-500 text-white font-semibold rounded-lg shadow-md active:scale-95 transition-transform">
                   Get Started
                 </button>
