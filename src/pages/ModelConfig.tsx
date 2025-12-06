@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Save, Play, Settings, ChevronLeft, Loader2 } from 'lucide-react';
+import { Save, Play, Settings, ChevronLeft, Loader2, Edit2 } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import NodeSidebar from '../components/workflow/NodeSidebar';
@@ -28,6 +28,7 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 export default function ModelConfig() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
   
   // Workflow state
   const [nodes, setNodes] = useState<WorkflowNode[]>([]);
@@ -327,15 +328,25 @@ export default function ModelConfig() {
             <span className="text-sm">{projectId ? 'Projects' : 'Back'}</span>
           </button>
           <div className="h-6 w-px bg-gray-200" />
-          <input
-            type="text"
-            value={workflowName}
-            onChange={(e) => {
-              setWorkflowName(e.target.value);
-              setHasUnsavedChanges(true);
-            }}
-            className="text-lg font-semibold bg-transparent border-none focus:outline-none focus:ring-2 focus:ring-purple-500 rounded px-2 py-1"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              ref={nameInputRef}
+              type="text"
+              value={workflowName}
+              onChange={(e) => {
+                setWorkflowName(e.target.value);
+                setHasUnsavedChanges(true);
+              }}
+              className="text-lg font-semibold bg-transparent border-none focus:outline-none focus:ring-2 focus:ring-purple-500 rounded px-2 py-1"
+            />
+            <button
+              onClick={() => nameInputRef.current?.focus()}
+              title="Edit workflow name"
+              className="p-1 rounded-md hover:bg-gray-100"
+            >
+              <Edit2 className="w-4 h-4 text-gray-500" />
+            </button>
+          </div>
           {hasUnsavedChanges && (
             <span className="text-xs text-orange-500 font-medium">Unsaved changes</span>
           )}
