@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
@@ -9,7 +9,11 @@ import {
   User, 
   Settings,
   Zap,
-  AlertCircle
+  AlertCircle,
+  Mic,
+  Volume2,
+  VolumeX,
+  Square
 } from 'lucide-react';
 import Navbar from '../components/Navbar';
 
@@ -23,6 +27,7 @@ interface Message {
   model_used?: string;
   processing_time_ms?: number;
   nodes_executed?: string[];
+  audioUrl?: string; // For voice output
 }
 
 interface Project {
@@ -39,6 +44,15 @@ interface ValidationResult {
   node_types: string[];
 }
 
+interface WorkflowType {
+  input_type: 'text' | 'voice';
+  output_type: 'text' | 'voice';
+  workflow_type: 'text-to-text' | 'text-to-voice' | 'voice-to-text' | 'voice-to-voice';
+  has_rag: boolean;
+  has_sheets: boolean;
+  has_condition: boolean;
+}
+
 export default function DemoPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -51,6 +65,14 @@ export default function DemoPage() {
   const [error, setError] = useState<string | null>(null);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [showDebug, setShowDebug] = useState(false);
+  const [workflowType, setWorkflowType] = useState<WorkflowType | null>(null);
+  
+  // Voice recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  
+  // Audio playback state
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -82,15 +104,25 @@ export default function DemoPage() {
         const projectData = await projectRes.json();
         setProject(projectData);
 
-        // Validate workflow
-        const validateRes = await fetch(`${API_BASE}/api/projects/${projectId}/validate`, {
-          method: 'POST',
-          credentials: 'include',
-        });
+        // Validate workflow and get workflow type in parallel
+        const [validateRes, workflowTypeRes] = await Promise.all([
+          fetch(`${API_BASE}/api/projects/${projectId}/validate`, {
+            method: 'POST',
+            credentials: 'include',
+          }),
+          fetch(`${API_BASE}/api/projects/${projectId}/workflow-type`, {
+            credentials: 'include',
+          }),
+        ]);
         
         if (validateRes.ok) {
           const validationData = await validateRes.json();
           setValidation(validationData);
+        }
+        
+        if (workflowTypeRes.ok) {
+          const workflowTypeData = await workflowTypeRes.json();
+          setWorkflowType(workflowTypeData);
         }
         
       } catch (err) {
@@ -114,6 +146,137 @@ export default function DemoPage() {
       inputRef.current?.focus();
     }
   }, [loading]);
+
+  // Voice recording functions
+  const handleVoiceInput = useCallback(async (_audioBlob: Blob) => {
+    // For demo, we'll use a placeholder transcription
+    // In production, this would call a speech-to-text API
+    const mockTranscription = "[Voice message received]";
+    
+    // Create user message
+    const userMessage: Message = {
+      id: `msg-${Date.now()}-user`,
+      role: 'user',
+      content: mockTranscription,
+      timestamp: new Date(),
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setSending(true);
+    setError(null);
+
+    try {
+      // Build conversation history for context
+      const conversationHistory = messages.map(msg => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+
+      // For voice workflows, we could send the audio blob
+      // For now, we'll send the transcription
+      const res = await fetch(`${API_BASE}/api/projects/${projectId}/demo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          message: mockTranscription,
+          conversation_history: conversationHistory,
+          session_id: projectId,
+          is_voice_input: true,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to get response');
+      }
+
+      const data = await res.json();
+      
+      const assistantMessage: Message = {
+        id: `msg-${Date.now()}-assistant`,
+        role: 'assistant',
+        content: data.response,
+        timestamp: new Date(),
+        model_used: data.model_used,
+        processing_time_ms: data.processing_time_ms,
+        nodes_executed: data.nodes_executed,
+      };
+
+      setMessages(prev => [...prev, assistantMessage]);
+      
+      // If voice output, play the audio
+      if (workflowType?.output_type === 'voice') {
+        speakResponse(data.response);
+      }
+      
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send message');
+      setMessages(prev => prev.filter(m => m.id !== userMessage.id));
+    } finally {
+      setSending(false);
+    }
+  }, [messages, projectId, workflowType]);
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      };
+      
+      recorder.onstop = async () => {
+        const audioBlob = new Blob(chunks, { type: 'audio/webm' });
+        
+        // Convert to text using Web Speech API or send to backend for transcription
+        await handleVoiceInput(audioBlob);
+        
+        // Stop all tracks
+        stream.getTracks().forEach(track => track.stop());
+      };
+      
+      setMediaRecorder(recorder);
+      recorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      setError('Failed to access microphone. Please allow microphone access.');
+      console.error('Microphone error:', err);
+    }
+  }, [handleVoiceInput]);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorder && isRecording) {
+      mediaRecorder.stop();
+      setIsRecording(false);
+    }
+  }, [mediaRecorder, isRecording]);
+
+  // Text-to-speech for voice output
+  const speakResponse = (text: string) => {
+    if ('speechSynthesis' in window) {
+      // Cancel any ongoing speech
+      window.speechSynthesis.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+      
+      window.speechSynthesis.speak(utterance);
+    }
+  };
+
+  const stopSpeaking = () => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    setPlayingAudioId(null);
+  };
 
   const sendMessage = async () => {
     if (!inputValue.trim() || sending) return;
@@ -166,6 +329,11 @@ export default function DemoPage() {
       };
 
       setMessages(prev => [...prev, assistantMessage]);
+      
+      // If voice output workflow, automatically speak the response
+      if (workflowType?.output_type === 'voice') {
+        speakResponse(data.response);
+      }
       
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send message');
@@ -320,6 +488,35 @@ export default function DemoPage() {
                     }`}
                   >
                     <p className="whitespace-pre-wrap">{message.content}</p>
+                    
+                    {/* Voice output controls for assistant messages */}
+                    {message.role === 'assistant' && workflowType?.output_type === 'voice' && (
+                      <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            if (playingAudioId === message.id) {
+                              stopSpeaking();
+                            } else {
+                              setPlayingAudioId(message.id);
+                              speakResponse(message.content);
+                            }
+                          }}
+                          className="flex items-center gap-1 text-xs text-purple-600 hover:text-purple-800 transition-colors"
+                        >
+                          {playingAudioId === message.id ? (
+                            <>
+                              <VolumeX className="w-4 h-4" />
+                              Stop
+                            </>
+                          ) : (
+                            <>
+                              <Volume2 className="w-4 h-4" />
+                              Play audio
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
                   </div>
                   
                   {/* Debug info for assistant messages */}
@@ -387,33 +584,110 @@ export default function DemoPage() {
       {/* Input Area */}
       <footer className="bg-white border-t border-gray-200 px-4 py-4">
         <div className="max-w-4xl mx-auto">
-          <div className="flex items-center gap-3">
-            <input
-              ref={inputRef}
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Type your message..."
-              disabled={sending}
-              className="flex-1 px-4 py-3 bg-gray-100 border border-gray-200 rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:opacity-50"
-            />
-            <motion.button
-              onClick={sendMessage}
-              disabled={!inputValue.trim() || sending}
-              className="p-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              {sending ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <Send className="w-5 h-5" />
-              )}
-            </motion.button>
-          </div>
+          {/* Workflow Type Indicator */}
+          {workflowType && (
+            <div className="flex items-center justify-center gap-2 mb-3">
+              <span className={`px-2 py-0.5 text-xs rounded-full ${
+                workflowType.input_type === 'voice' 
+                  ? 'bg-blue-100 text-blue-700' 
+                  : 'bg-gray-100 text-gray-600'
+              }`}>
+                {workflowType.input_type === 'voice' ? '🎤 Voice Input' : '⌨️ Text Input'}
+              </span>
+              <span className="text-gray-400">→</span>
+              <span className={`px-2 py-0.5 text-xs rounded-full ${
+                workflowType.output_type === 'voice' 
+                  ? 'bg-green-100 text-green-700' 
+                  : 'bg-gray-100 text-gray-600'
+              }`}>
+                {workflowType.output_type === 'voice' ? '🔊 Voice Output' : '💬 Text Output'}
+              </span>
+            </div>
+          )}
+
+          {/* Voice Input Mode */}
+          {workflowType?.input_type === 'voice' ? (
+            <div className="flex flex-col items-center gap-4">
+              <motion.button
+                onClick={isRecording ? stopRecording : startRecording}
+                disabled={sending}
+                className={`p-6 rounded-full transition-all ${
+                  isRecording 
+                    ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
+                    : 'bg-purple-600 hover:bg-purple-700'
+                } text-white disabled:opacity-50 disabled:cursor-not-allowed`}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                {sending ? (
+                  <Loader2 className="w-8 h-8 animate-spin" />
+                ) : isRecording ? (
+                  <Square className="w-8 h-8" />
+                ) : (
+                  <Mic className="w-8 h-8" />
+                )}
+              </motion.button>
+              <p className="text-sm text-gray-500">
+                {isRecording ? 'Recording... Click to stop' : 'Click to start recording'}
+              </p>
+              
+              {/* Also allow text input as fallback */}
+              <div className="w-full flex items-center gap-3 mt-2">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Or type your message..."
+                  disabled={sending || isRecording}
+                  className="flex-1 px-4 py-2 bg-gray-100 border border-gray-200 rounded-xl text-gray-800 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:opacity-50"
+                />
+                <motion.button
+                  onClick={sendMessage}
+                  disabled={!inputValue.trim() || sending || isRecording}
+                  className="p-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  <Send className="w-4 h-4" />
+                </motion.button>
+              </div>
+            </div>
+          ) : (
+            /* Text Input Mode (default) */
+            <div className="flex items-center gap-3">
+              <input
+                ref={inputRef}
+                type="text"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Type your message..."
+                disabled={sending}
+                className="flex-1 px-4 py-3 bg-gray-100 border border-gray-200 rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:opacity-50"
+              />
+              <motion.button
+                onClick={sendMessage}
+                disabled={!inputValue.trim() || sending}
+                className="p-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                {sending ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Send className="w-5 h-5" />
+                )}
+              </motion.button>
+            </div>
+          )}
+          
           <p className="text-xs text-gray-400 mt-2 text-center">
-            Press Enter to send • Your workflow runs on each message
+            {workflowType?.input_type === 'voice' 
+              ? 'Speak or type your message • Your workflow runs on each message'
+              : 'Press Enter to send • Your workflow runs on each message'
+            }
           </p>
         </div>
       </footer>
