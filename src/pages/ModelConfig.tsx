@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Save, Play, Settings, ChevronLeft, Loader2 } from 'lucide-react';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
+import Swal from 'sweetalert2';
 import NodeSidebar from '../components/workflow/NodeSidebar';
 import WorkflowCanvas from '../components/workflow/WorkflowCanvas';
 import {
@@ -97,6 +98,7 @@ export default function ModelConfig() {
     };
     setNodes((prev) => [...prev, newNode]);
     setSelectedNodeId(newNode.id);
+    setHasUnsavedChanges(true);
   }, []);
 
   // Handle node movement
@@ -106,6 +108,7 @@ export default function ModelConfig() {
         node.id === nodeId ? { ...node, position } : node
       )
     );
+    setHasUnsavedChanges(true);
   }, []);
 
   // Handle node selection
@@ -133,6 +136,7 @@ export default function ModelConfig() {
     if (configPanelNode?.id === nodeId) {
       setConfigPanelNode(null);
     }
+    setHasUnsavedChanges(true);
   }, [selectedNodeId, configPanelNode]);
 
   // Handle connection creation
@@ -143,6 +147,7 @@ export default function ModelConfig() {
         id: `conn-${Date.now()}`,
       };
       setConnections((prev) => [...prev, newConnection]);
+      setHasUnsavedChanges(true);
     },
     []
   );
@@ -155,6 +160,7 @@ export default function ModelConfig() {
       )
     );
     setConfigPanelNode(null);
+    setHasUnsavedChanges(true);
   }, []);
 
   // Handle workflow save
@@ -176,7 +182,7 @@ export default function ModelConfig() {
         });
         if (!res.ok) throw new Error('Failed to save');
         setHasUnsavedChanges(false);
-        alert('Project saved!');
+        await Swal.fire({ icon: 'success', title: 'Saved', text: 'Project saved.' });
       } else {
         // Create new project
         const res = await fetch(`${API_BASE}/api/projects`, {
@@ -194,13 +200,56 @@ export default function ModelConfig() {
         const newProject = await res.json();
         setHasUnsavedChanges(false);
         navigate(`/model-config/${newProject.id}`, { replace: true });
-        alert('Project created!');
+        await Swal.fire({ icon: 'success', title: 'Created', text: 'Project created.' });
       }
     } catch (err) {
       console.error('Save error:', err);
-      alert('Failed to save project');
+      await Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to save project' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  // beforeunload - ask browser confirmation when there are unsaved changes
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+      return undefined;
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [hasUnsavedChanges]);
+
+  // navigation guard for Back link
+  const navigateWithGuard = async (to: string) => {
+    if (!hasUnsavedChanges) {
+      navigate(to);
+      return;
+    }
+
+    const result = await Swal.fire({
+      title: 'Unsaved changes',
+      text: 'You have unsaved changes. What would you like to do?',
+      icon: 'warning',
+      showDenyButton: true,
+      showCancelButton: true,
+      confirmButtonText: 'Save changes',
+      denyButtonText: `Leave without saving`,
+      cancelButtonText: 'Cancel',
+    });
+
+    if (result.isConfirmed) {
+      await handleSaveWorkflow();
+      navigate(to);
+    } else if (result.isDenied) {
+      setHasUnsavedChanges(false);
+      navigate(to);
+    } else {
+      // Cancel - do nothing
     }
   };
 
@@ -270,13 +319,13 @@ export default function ModelConfig() {
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link
-            to={projectId ? "/projects" : "/"}
+          <button
+            onClick={() => navigateWithGuard(projectId ? '/projects' : '/')}
             className="flex items-center gap-1 text-gray-600 hover:text-gray-900 transition-colors"
           >
             <ChevronLeft className="w-5 h-5" />
             <span className="text-sm">{projectId ? 'Projects' : 'Back'}</span>
-          </Link>
+          </button>
           <div className="h-6 w-px bg-gray-200" />
           <input
             type="text"
