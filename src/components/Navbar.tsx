@@ -26,6 +26,7 @@ const Navbar = () => {
 
   const navLinks = [
     { name: "Overview", href: "/voice" },
+    { name: "My Projects", href: "/projects" },
     { name: "Features", href: "#" },
     { name: "About", href: "#" },
     { name: "Pricing", href: "#" },

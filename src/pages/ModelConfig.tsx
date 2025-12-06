@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Save, Play, Settings, ChevronLeft } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Save, Play, Settings, ChevronLeft, Loader2 } from 'lucide-react';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import NodeSidebar from '../components/workflow/NodeSidebar';
 import WorkflowCanvas from '../components/workflow/WorkflowCanvas';
 import {
@@ -22,13 +22,62 @@ import type {
   IfConditionData,
 } from '../types/workflow';
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+
 export default function ModelConfig() {
+  const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
+  
   // Workflow state
   const [nodes, setNodes] = useState<WorkflowNode[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [configPanelNode, setConfigPanelNode] = useState<WorkflowNode | null>(null);
   const [workflowName, setWorkflowName] = useState('Untitled Workflow');
+  const [workflowDescription, setWorkflowDescription] = useState('');
+  
+  // Loading / saving state
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  // Load project on mount if projectId is provided
+  useEffect(() => {
+    const loadProjectData = async (id: string) => {
+      try {
+        setLoading(true);
+        const res = await fetch(`${API_BASE}/api/projects/${id}`, {
+          credentials: 'include',
+        });
+        if (!res.ok) {
+          if (res.status === 401) {
+            navigate('/login');
+            return;
+          }
+          if (res.status === 404) {
+            navigate('/projects');
+            return;
+          }
+          throw new Error('Failed to load project');
+        }
+        const project = await res.json();
+        setWorkflowName(project.name || 'Untitled Workflow');
+        setWorkflowDescription(project.description || '');
+        setNodes(project.nodes || []);
+        setConnections(project.connections || []);
+        setHasUnsavedChanges(false);
+      } catch (err) {
+        console.error('Failed to load project:', err);
+        navigate('/projects');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (projectId) {
+      loadProjectData(projectId);
+    }
+  }, [projectId, navigate]);
 
   // Handle drag from sidebar
   const handleDragStart = (e: React.DragEvent, template: NodeTemplate) => {
@@ -108,20 +157,51 @@ export default function ModelConfig() {
     setConfigPanelNode(null);
   }, []);
 
-  // Handle workflow save (mock)
-  const handleSaveWorkflow = () => {
-    const workflow = {
-      id: `workflow-${Date.now()}`,
-      name: workflowName,
-      description: '',
-      nodes,
-      connections,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    console.log('Saving workflow:', workflow);
-    // TODO: Call API to save workflow
-    alert('Workflow saved! (Check console for data)');
+  // Handle workflow save
+  const handleSaveWorkflow = async () => {
+    setSaving(true);
+    try {
+      if (projectId) {
+        // Update existing project
+        const res = await fetch(`${API_BASE}/api/projects/${projectId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            name: workflowName,
+            description: workflowDescription,
+            nodes,
+            connections,
+          }),
+        });
+        if (!res.ok) throw new Error('Failed to save');
+        setHasUnsavedChanges(false);
+        alert('Project saved!');
+      } else {
+        // Create new project
+        const res = await fetch(`${API_BASE}/api/projects`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            name: workflowName,
+            description: workflowDescription,
+            nodes,
+            connections,
+          }),
+        });
+        if (!res.ok) throw new Error('Failed to create');
+        const newProject = await res.json();
+        setHasUnsavedChanges(false);
+        navigate(`/model-config/${newProject.id}`, { replace: true });
+        alert('Project created!');
+      }
+    } catch (err) {
+      console.error('Save error:', err);
+      alert('Failed to save project');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Handle workflow run (mock)
@@ -173,36 +253,55 @@ export default function ModelConfig() {
     }
   };
 
+  // Show loading spinner while loading project
+  if (loading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-100">
+        <div className="text-center">
+          <Loader2 className="w-10 h-10 text-purple-600 animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">Loading project...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen flex flex-col bg-gray-100">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Link
-            to="/"
+            to={projectId ? "/projects" : "/"}
             className="flex items-center gap-1 text-gray-600 hover:text-gray-900 transition-colors"
           >
             <ChevronLeft className="w-5 h-5" />
-            <span className="text-sm">Back</span>
+            <span className="text-sm">{projectId ? 'Projects' : 'Back'}</span>
           </Link>
           <div className="h-6 w-px bg-gray-200" />
           <input
             type="text"
             value={workflowName}
-            onChange={(e) => setWorkflowName(e.target.value)}
+            onChange={(e) => {
+              setWorkflowName(e.target.value);
+              setHasUnsavedChanges(true);
+            }}
             className="text-lg font-semibold bg-transparent border-none focus:outline-none focus:ring-2 focus:ring-purple-500 rounded px-2 py-1"
           />
+          {hasUnsavedChanges && (
+            <span className="text-xs text-orange-500 font-medium">Unsaved changes</span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
           <motion.button
             onClick={handleSaveWorkflow}
-            className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+            disabled={saving}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
-            <Save className="w-4 h-4" />
-            Save
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {saving ? 'Saving...' : 'Save'}
           </motion.button>
           <motion.button
             onClick={handleRunWorkflow}
