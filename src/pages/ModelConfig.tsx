@@ -254,11 +254,48 @@ export default function ModelConfig() {
     }
   };
 
-  // Handle workflow run (mock)
-  const handleRunWorkflow = () => {
-    console.log('Running workflow with nodes:', nodes);
-    // TODO: Call API to run workflow
-    alert('Workflow started! (Mock)');
+  // Handle workflow run - navigate to demo page
+  const handleRunWorkflow = async () => {
+    if (hasUnsavedChanges) {
+      // Ask to save first
+      const result = await Swal.fire({
+        title: 'Save before demo?',
+        text: 'You have unsaved changes. Would you like to save before testing?',
+        icon: 'question',
+        showDenyButton: true,
+        showCancelButton: true,
+        confirmButtonText: 'Save and test',
+        denyButtonText: 'Test without saving',
+        cancelButtonText: 'Cancel',
+      });
+
+      if (result.isConfirmed) {
+        await handleSaveWorkflow();
+        if (projectId) {
+          navigate(`/demo/${projectId}`);
+        }
+      } else if (result.isDenied) {
+        if (projectId) {
+          navigate(`/demo/${projectId}`);
+        } else {
+          await Swal.fire({
+            icon: 'info',
+            title: 'Save required',
+            text: 'Please save your workflow first to test it.',
+          });
+        }
+      }
+    } else {
+      if (projectId) {
+        navigate(`/demo/${projectId}`);
+      } else {
+        await Swal.fire({
+          icon: 'info',
+          title: 'Save required',
+          text: 'Please save your workflow first to test it.',
+        });
+      }
+    }
   };
 
   // Render config panel based on node type
