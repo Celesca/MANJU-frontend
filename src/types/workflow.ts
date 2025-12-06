@@ -1,6 +1,6 @@
 // Workflow Builder Types for Voice Call Center Chatbot Configuration
 
-export type NodeType = 'ai-model' | 'rag-documents' | 'google-sheets' | 'voice-input' | 'voice-output' | 'if-condition';
+export type NodeType = 'ai-model' | 'rag-documents' | 'google-sheets' | 'voice-input' | 'voice-output' | 'text-input' | 'text-output' | 'if-condition';
 
 export interface Position {
   x: number;
@@ -71,6 +71,17 @@ export interface VoiceOutputData {
   pitch: number;
 }
 
+export interface TextInputData {
+  placeholder?: string;
+  allowMultiline: boolean;
+  maxLength?: number;
+}
+
+export interface TextOutputData {
+  format: 'plain' | 'ssml';
+  truncateLength?: number;
+}
+
 export interface IfConditionData {
   conditionType: 'contains' | 'equals' | 'startsWith' | 'endsWith' | 'regex' | 'custom';
   conditionValue: string;
@@ -84,6 +95,8 @@ export type NodeData =
   | GoogleSheetsData 
   | VoiceInputData 
   | VoiceOutputData
+  | TextInputData
+  | TextOutputData
   | IfConditionData;
 
 // Connection between nodes
