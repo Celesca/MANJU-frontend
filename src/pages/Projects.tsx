@@ -10,8 +10,10 @@ import {
   Clock, 
   Search,
   MoreVertical,
-  ChevronLeft
+  ChevronLeft,
+  Edit2
 } from 'lucide-react';
+import Swal from 'sweetalert2';
 import Navbar from '../components/Navbar';
 
 interface Project {
@@ -36,6 +38,9 @@ export default function Projects() {
   const [newProjectDescription, setNewProjectDescription] = useState('');
   const [creating, setCreating] = useState(false);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // Fetch projects on mount
   useEffect(() => {
@@ -62,6 +67,20 @@ export default function Projects() {
     };
     loadProjects();
   }, [navigate]);
+
+  // Warn on unload if editing unsaved changes
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (editingId) {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+      return undefined;
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [editingId]);
 
   const createProject = async () => {
     if (!newProjectName.trim()) return;
@@ -115,6 +134,71 @@ export default function Projects() {
       setProjects((prev) => prev.filter((p) => p.id !== id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete project');
+    }
+  };
+
+  const startRename = (projectId: string, currentName: string) => {
+    setEditingId(projectId);
+    setEditingName(currentName);
+    setMenuOpenId(null);
+  };
+
+  const cancelRename = () => {
+    setEditingId(null);
+    setEditingName('');
+  };
+
+  const saveRename = async (projectId: string) => {
+    if (!editingName.trim()) return;
+    try {
+      setSavingEdit(true);
+      const res = await fetch(`${API_BASE}/api/projects/${projectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ name: editingName }),
+      });
+      if (!res.ok) throw new Error('Failed to save project name');
+      const updated = await res.json();
+      setProjects((prev) => prev.map((p) => (p.id === projectId ? updated : p)));
+      setEditingId(null);
+      setEditingName('');
+      Swal.fire({ icon: 'success', title: 'Saved', text: 'Project name saved.' });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  // Navigate with unsaved guard: shows SweetAlert with options Save / Leave without saving / Cancel
+  const navigateWithGuard = async (to: string, projectId?: string) => {
+    if (!editingId) {
+      navigate(to);
+      return;
+    }
+
+    const result = await Swal.fire({
+      title: 'Unsaved changes',
+      text: 'You have unsaved changes. What would you like to do?',
+      icon: 'warning',
+      showDenyButton: true,
+      showCancelButton: true,
+      confirmButtonText: 'Save changes',
+      denyButtonText: `Leave without saving`,
+      cancelButtonText: 'Cancel',
+    });
+
+    if (result.isConfirmed) {
+      // Save then navigate
+      await saveRename(editingId!);
+      navigate(to);
+    } else if (result.isDenied) {
+      // Discard and navigate
+      cancelRename();
+      navigate(to);
+    } else {
+      // Cancel - stay
     }
   };
 
@@ -240,9 +324,29 @@ export default function Projects() {
                 <div className="p-5">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-lg font-semibold text-gray-900 truncate">
-                        {project.name}
-                      </h3>
+                      <div className="flex items-center gap-2">
+                        {editingId === project.id ? (
+                          <input
+                            value={editingName}
+                            onChange={(e) => setEditingName(e.target.value)}
+                            className="px-3 py-1 border border-gray-300 rounded-md text-gray-900 w-full"
+                          />
+                        ) : (
+                          <h3 className="text-lg font-semibold text-gray-900 truncate">
+                            {project.name}
+                          </h3>
+                        )}
+
+                        {!editingId && (
+                          <button
+                            title="Rename project"
+                            onClick={() => startRename(project.id, project.name)}
+                            className="p-1 hover:bg-gray-100 rounded-md"
+                          >
+                            <Edit2 className="w-4 h-4 text-gray-500" />
+                          </button>
+                        )}
+                      </div>
                       <p className="text-sm text-gray-500 truncate mt-1">
                         {project.description || 'No description'}
                       </p>
@@ -266,7 +370,8 @@ export default function Projects() {
                             <button
                               onClick={() => {
                                 setMenuOpenId(null);
-                                navigate(`/model-config/${project.id}`);
+                                // navigate with guard in case there's an active rename
+                                navigateWithGuard(`/model-config/${project.id}`);
                               }}
                               className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
                             >
@@ -301,13 +406,31 @@ export default function Projects() {
                 </div>
                 
                 <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex gap-2">
-                  <Link
-                    to={`/model-config/${project.id}`}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors"
-                  >
-                    <Settings className="w-4 h-4" />
-                    Open Editor
-                  </Link>
+                  {editingId === project.id ? (
+                    <div className="flex-1 flex items-center justify-center gap-2 px-4 py-2">
+                      <button
+                        onClick={() => cancelRename()}
+                        className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                      >
+                        Don't Save
+                      </button>
+                      <button
+                        onClick={() => saveRename(project.id)}
+                        disabled={savingEdit || !editingName.trim()}
+                        className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {savingEdit ? 'Saving...' : 'Save changes'}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => navigateWithGuard(`/model-config/${project.id}`)}
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors"
+                    >
+                      <Settings className="w-4 h-4" />
+                      Open Editor
+                    </button>
+                  )}
                   <button
                     className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
                     title="Run workflow"
