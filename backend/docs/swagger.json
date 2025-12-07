@@ -1,0 +1,138 @@
+
+{
+	"swagger": "2.0",
+	"info": {
+		"description": "Manju backend API",
+		"version": "1.0.0",
+		"title": "Manju API"
+	},
+	"host": "localhost:8000",
+	"basePath": "/api/v1",
+	"schemes": [
+		"http"
+	],
+	"consumes": [
+		"application/json"
+	],
+	"produces": [
+		"application/json"
+	],
+	"paths": {
+		"/users": {
+			"get": {
+				"summary": "List users",
+				"description": "Returns a list of users",
+				"responses": {
+					"200": {
+						"description": "A list of users",
+						"schema": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/User"
+							}
+						}
+					},
+					"500": { "description": "Internal Server Error", "schema": { "$ref": "#/definitions/ErrorResponse" } }
+				}
+			},
+			"post": {
+				"summary": "Create user",
+				"description": "Create a new user",
+				"parameters": [
+					{
+						"in": "body",
+						"name": "body",
+						"required": true,
+						"schema": {
+							"$ref": "#/definitions/CreateUserPayload"
+						}
+					}
+				],
+				"responses": {
+					"201": {
+						"description": "Created",
+						"schema": { "$ref": "#/definitions/User" }
+					},
+					"400": { "description": "Bad Request", "schema": { "$ref": "#/definitions/ErrorResponse" } },
+					"500": { "description": "Internal Server Error", "schema": { "$ref": "#/definitions/ErrorResponse" } }
+				}
+			}
+		},
+		"/users/{id}": {
+			"parameters": [
+				{
+					"name": "id",
+					"in": "path",
+					"required": true,
+					"type": "string"
+				}
+			],
+			"get": {
+				"summary": "Get user",
+				"description": "Get a user by ID",
+				"responses": {
+					"200": { "description": "OK", "schema": { "$ref": "#/definitions/User" } },
+					"404": { "description": "Not Found", "schema": { "$ref": "#/definitions/ErrorResponse" } },
+					"500": { "description": "Internal Server Error", "schema": { "$ref": "#/definitions/ErrorResponse" } }
+				}
+			},
+			"put": {
+				"summary": "Update user",
+				"description": "Update a user by ID",
+				"parameters": [
+					{
+						"in": "body",
+						"name": "body",
+						"required": true,
+						"schema": { "$ref": "#/definitions/CreateUserPayload" }
+					}
+				],
+				"responses": {
+					"200": { "description": "OK", "schema": { "$ref": "#/definitions/User" } },
+					"400": { "description": "Bad Request", "schema": { "$ref": "#/definitions/ErrorResponse" } },
+					"404": { "description": "Not Found", "schema": { "$ref": "#/definitions/ErrorResponse" } },
+					"500": { "description": "Internal Server Error", "schema": { "$ref": "#/definitions/ErrorResponse" } }
+				}
+			},
+			"delete": {
+				"summary": "Delete user",
+				"description": "Delete a user by ID",
+				"responses": {
+					"204": { "description": "No Content" },
+					"404": { "description": "Not Found", "schema": { "$ref": "#/definitions/ErrorResponse" } },
+					"500": { "description": "Internal Server Error", "schema": { "$ref": "#/definitions/ErrorResponse" } }
+				}
+			}
+		}
+	},
+	"definitions": {
+		"User": {
+			"type": "object",
+			"properties": {
+				"id": { "type": "string", "format": "uuid" },
+				"email": { "type": "string", "format": "email" },
+				"name": { "type": "string" },
+				"info": { "type": "object", "additionalProperties": true },
+				"status": { "type": "string", "enum": ["active", "inactive", "suspended"] },
+				"created_at": { "type": "string", "format": "date-time" },
+				"updated_at": { "type": "string", "format": "date-time", "nullable": true }
+			}
+		},
+		"CreateUserPayload": {
+			"type": "object",
+			"required": ["email", "name"],
+			"properties": {
+				"email": { "type": "string", "format": "email" },
+				"name": { "type": "string" },
+				"info": { "type": "object", "additionalProperties": true },
+				"status": { "type": "string", "enum": ["active", "inactive", "suspended"] }
+			}
+		},
+		"ErrorResponse": {
+			"type": "object",
+			"properties": {
+				"error": { "type": "string" }
+			}
+		}
+	}
+}

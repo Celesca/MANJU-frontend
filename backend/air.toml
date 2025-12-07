@@ -1,0 +1,16 @@
+# Air config for hot-reload during development
+root = "./"
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/main ./..."
+  bin = "./tmp/main"
+  include_ext = ["go", "tpl", "tmpl", "html", "css", "js"]
+  exclude_dir = ["assets", "vendor", "tmp"]
+  kill_delay = 500
+
+[log]
+  time = true
+
+[log.color]
+  on = true
