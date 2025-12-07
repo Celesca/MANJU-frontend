@@ -52,7 +52,7 @@ export const nodeTemplates: NodeTemplate[] = [
   {
     type: 'rag-documents',
     label: 'RAG Documents',
-    description: 'Upload & index documents',
+    description: 'Upload & index documents for context',
     icon: 'file-text',
     category: 'data',
     defaultData: {
@@ -61,8 +61,8 @@ export const nodeTemplates: NodeTemplate[] = [
       chunkOverlap: 50,
       embeddingModel: 'text-embedding-3-small',
     },
-    defaultInputs: [{ id: 'query-in', type: 'input', position: 'left', label: 'Input' }],
-    defaultOutputs: [{ id: 'context-out', type: 'output', position: 'right', label: 'Output' }],
+    defaultInputs: [],
+    defaultOutputs: [{ id: 'context-out', type: 'output', position: 'right', label: 'Context' }],
   },
   {
     type: 'google-sheets',
@@ -118,6 +118,7 @@ export const nodeTemplates: NodeTemplate[] = [
       conditionValue: '',
       caseSensitive: false,
       customExpression: '',
+      field: 'response', // Default to checking AI response
     },
     defaultInputs: [{ id: 'value-in', type: 'input', position: 'left', label: 'Input' }],
     defaultOutputs: [

@@ -32,6 +32,8 @@ export interface AIModelData {
   temperature: number;
   maxTokens: number;
   apiKeyConfigured: boolean;
+  expectedOutput?: string; // Expected output format for if-condition matching (e.g., "YES or NO")
+  outputVariable?: string; // Variable name to store the output for use in conditions
 }
 
 export interface RAGDocumentData {
@@ -83,10 +85,11 @@ export interface TextOutputData {
 }
 
 export interface IfConditionData {
-  conditionType: 'contains' | 'equals' | 'startsWith' | 'endsWith' | 'regex' | 'custom';
+  conditionType: 'contains' | 'equals' | 'startsWith' | 'endsWith' | 'regex' | 'isYes' | 'isNo' | 'custom';
   conditionValue: string;
   caseSensitive: boolean;
   customExpression?: string;
+  field: 'message' | 'response' | string; // 'message' for user input, 'response' for AI output, or variable name
 }
 
 export type NodeData = 

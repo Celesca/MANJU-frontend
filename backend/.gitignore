@@ -1,0 +1,7 @@
+# Ignore build and temp files
+tmp/
+*.db
+*.sqlite
+.env
+
+uploads
