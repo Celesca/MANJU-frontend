@@ -348,7 +348,8 @@ class NodeProcessors:
         system_prompt = node_data.get("systemPrompt", "You are a helpful assistant.")
         temperature = node_data.get("temperature", 0.7)
         expected_output = node_data.get("expectedOutput", "")
-        output_variable_name = node_data.get("outputVariableName", "")
+        # Frontend uses `outputVariable` (see AIModelConfigPanel.tsx / types). Accept both keys for safety.
+        output_variable_name = node_data.get("outputVariable", node_data.get("outputVariableName", ""))
         
         # Create LLM with specific model and temperature
         llm = None
@@ -431,10 +432,14 @@ class NodeProcessors:
             user_id = node_data.get("userId", "")
             top_k = node_data.get("topK", 3)
             
-            # Build index path
+            # Build index path. Prefer per-user/per-project index when both user_id and project_id present.
             index_base = os.getenv("FAISS_INDEX_PATH", "./faiss_indexes")
             if project_id:
-                index_persist_dir = os.path.join(index_base, user_id, project_id)
+                if user_id:
+                    index_persist_dir = os.path.join(index_base, user_id, project_id)
+                else:
+                    # Fallback to project-only index path if user_id is not provided
+                    index_persist_dir = os.path.join(index_base, project_id)
             else:
                 index_persist_dir = os.path.join(index_base, "default")
 

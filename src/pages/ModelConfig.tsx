@@ -170,6 +170,15 @@ export default function ModelConfig() {
     try {
       if (projectId) {
         // Update existing project
+        // Ensure rag nodes carry the projectId so the AI executor can locate the FAISS index
+        const nodesToSave = nodes.map((n) => {
+          if (n.type === 'rag-documents') {
+            const dataWithProject = { ...(n.data as RAGDocumentData), projectId };
+            return { ...n, data: dataWithProject };
+          }
+          return n;
+        });
+
         const res = await fetch(`${API_BASE}/api/projects/${projectId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -177,7 +186,7 @@ export default function ModelConfig() {
           body: JSON.stringify({
             name: workflowName,
             description: workflowDescription,
-            nodes,
+            nodes: nodesToSave,
             connections,
           }),
         });
