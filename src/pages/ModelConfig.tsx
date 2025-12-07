@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Save, Play, Settings, ChevronLeft, Loader2, Edit2 } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
+import { useAuth } from '../hooks/useAuth';
 import NodeSidebar from '../components/workflow/NodeSidebar';
 import WorkflowCanvas from '../components/workflow/WorkflowCanvas';
 import {
@@ -29,6 +30,7 @@ export default function ModelConfig() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const { user } = useAuth();
   
   // Workflow state
   const [nodes, setNodes] = useState<WorkflowNode[]>([]);
@@ -170,10 +172,10 @@ export default function ModelConfig() {
     try {
       if (projectId) {
         // Update existing project
-        // Ensure rag nodes carry the projectId so the AI executor can locate the FAISS index
+        // Ensure rag nodes carry the userId and projectId so the AI executor can locate the FAISS index
         const nodesToSave = nodes.map((n) => {
           if (n.type === 'rag-documents') {
-            const dataWithProject = { ...(n.data as RAGDocumentData), projectId };
+            const dataWithProject = { ...(n.data as RAGDocumentData), projectId, userId: user?.id };
             return { ...n, data: dataWithProject };
           }
           return n;

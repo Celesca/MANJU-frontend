@@ -96,6 +96,19 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		connections = []map[string]interface{}{}
 	}
 
+	// Inject userId and projectId into RAG nodes so AI executor can locate FAISS index
+	for i, node := range nodes {
+		if nodeType, ok := node["type"].(string); ok && nodeType == "rag-documents" {
+			nodeData, ok := node["data"].(map[string]interface{})
+			if !ok {
+				nodeData = map[string]interface{}{}
+			}
+			nodeData["userId"] = userIDStr.(string)
+			nodeData["projectId"] = projectID
+			nodes[i]["data"] = nodeData
+		}
+	}
+
 	// Build request to AI service
 	aiRequest := DemoChatRequest{
 		Message: body.Message,

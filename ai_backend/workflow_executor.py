@@ -387,6 +387,16 @@ class NodeProcessors:
         if context_parts:
             user_content = f"{chr(10).join(context_parts)}\n\nUser query: {user_content}"
         
+        # Debug: log whether rag context is present and a short preview
+        try:
+            rag_present = bool(state.get("rag_context"))
+            rag_preview = (state.get("rag_context") or "").replace("\n", " ")[:400]
+            user_preview = user_content.replace("\n", " ")[:400]
+            logger.info("AI Model call: rag_present=%s, rag_preview=%s", rag_present, rag_preview)
+            logger.debug("AI Model final user_content (truncated): %s", user_preview)
+        except Exception:
+            logger.exception("Error logging AI call debug info")
+
         messages.append(HumanMessage(content=user_content))
         
         # Generate response
@@ -426,14 +436,29 @@ class NodeProcessors:
             return state
 
         try:
-            # Get configuration from node data
-            documents_path = node_data.get("documentsPath", "./documents")
+            # Resolve documents path
+            # Priority: node data -> ENV DOCUMENTS_STORAGE_PATH -> ../backend/uploads/documents (relative to this file)
+            base_documents_dir = Path(os.getenv("DOCUMENTS_STORAGE_PATH", "")).resolve() if os.getenv("DOCUMENTS_STORAGE_PATH") else (Path(__file__).resolve().parent.parent / "backend" / "uploads" / "documents")
             project_id = node_data.get("projectId", "")
             user_id = node_data.get("userId", "")
             top_k = node_data.get("topK", 3)
             
+            # Build the full documents path including user_id/project_id to match Go backend layout
+            # Go backend stores documents at: uploads/documents/<userId>/<projectId>/
+            if node_data.get("documentsPath"):
+                # Use explicit path if provided
+                documents_path = node_data.get("documentsPath")
+            elif user_id and project_id:
+                # Build path with user_id and project_id
+                documents_path = str(base_documents_dir / user_id / project_id)
+            elif project_id:
+                # Fallback to project_id only
+                documents_path = str(base_documents_dir / project_id)
+            else:
+                documents_path = str(base_documents_dir)
+            
             # Build index path. Prefer per-user/per-project index when both user_id and project_id present.
-            index_base = os.getenv("FAISS_INDEX_PATH", "./faiss_indexes")
+            index_base = os.getenv("FAISS_INDEX_PATH", str(Path(__file__).resolve().parent / "faiss_indexes"))
             if project_id:
                 if user_id:
                     index_persist_dir = os.path.join(index_base, user_id, project_id)
@@ -452,26 +477,57 @@ class NodeProcessors:
                 openai_api_key=os.getenv("OPENAI_API_KEY")
             )
 
-            # Try to load existing FAISS index
-            index_path = Path(index_persist_dir)
+            # Try to load existing FAISS index. Support multiple possible index layouts
+            # Candidate order: (1) index_base/user_id/project_id, (2) index_base/project_id, (3) index_base/project_id (legacy)
             vectorstore = None
+            state.setdefault("rag_debug", {})
+            tried_index_paths = []
 
-            if index_path.exists() and (index_path / "index.faiss").exists():
-                try:
-                    vectorstore = FAISS.load_local(
-                        str(index_path),
-                        embeddings,
-                        allow_dangerous_deserialization=True
-                    )
-                    logger.info(f"Loaded existing FAISS index from {index_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to load FAISS index: {e}")
+            candidates = []
+            # Prefer user/project if both provided
+            if user_id and project_id:
+                candidates.append(os.path.join(index_base, user_id, project_id))
+            # Project-only path
+            if project_id:
+                candidates.append(os.path.join(index_base, project_id))
+            # Fallback: index_base/default
+            candidates.append(os.path.join(index_base, "default"))
+
+            # Try each candidate until we find an index.faiss
+            index_loaded = False
+            for cand in candidates:
+                cand_path = Path(cand)
+                tried_index_paths.append(str(cand_path))
+                cand_index_file = cand_path / "index.faiss"
+                exists = cand_path.exists() and cand_index_file.exists()
+                state["rag_debug"].setdefault("index_candidates", [])
+                state["rag_debug"]["index_candidates"].append({"path": str(cand_path), "exists": exists})
+                if exists:
+                    try:
+                        vectorstore = FAISS.load_local(str(cand_path), embeddings, allow_dangerous_deserialization=True)
+                        logger.info("Loaded existing FAISS index from %s", cand_path)
+                        index_loaded = True
+                        state["rag_debug"]["index_loaded_from"] = str(cand_path)
+                        break
+                    except Exception as e:
+                        logger.warning("Failed to load FAISS index at %s: %s", cand_path, e)
+                        state["rag_debug"].setdefault("index_load_errors", []).append({"path": str(cand_path), "error": str(e)})
+
+            # Record what we tried
+            state["rag_debug"]["index_paths_tried"] = tried_index_paths
+            state["rag_debug"]["index_exists_any"] = index_loaded
+            state["rag_debug"]["user_id"] = user_id
+            state["rag_debug"]["project_id"] = project_id
+            state["rag_debug"]["documents_path"] = documents_path
+            logger.info("RAG: user_id=%s project_id=%s | index_candidates=%s | loaded=%s | documents_path=%s", user_id, project_id, tried_index_paths, index_loaded, documents_path)
 
             if vectorstore is None:
                 # Try to create index from documents
                 docs_path = Path(documents_path)
                 if docs_path.exists():
                     documents = load_documents_from_directory(str(docs_path))
+                    state["rag_debug"]["documents_found"] = len(documents)
+                    logger.info("RAG embedding: documents_found=%s at %s", len(documents), docs_path)
                     if documents:
                         # Split documents
                         text_splitter = RecursiveCharacterTextSplitter(
@@ -484,18 +540,38 @@ class NodeProcessors:
                         vectorstore = FAISS.from_documents(splits, embeddings)
 
                         # Save for future use
+                        # Save to the preferred candidate (first in our candidates list)
+                        try:
+                            index_path = Path(candidates[0]) if candidates else Path(index_base) / "default"
+                        except Exception:
+                            index_path = Path(index_base) / "default"
                         index_path.mkdir(parents=True, exist_ok=True)
                         vectorstore.save_local(str(index_path))
                         logger.info(f"Created and saved FAISS index to {index_path}")
+                        state["rag_debug"]["index_created"] = True
+                        state["rag_debug"]["chunks_count"] = len(splits)
                     else:
-                        state["rag_context"] = f"[No documents found at {documents_path}]"
-                        return state
+                            # No documents to embed - record debug and avoid injecting error text
+                            state.setdefault("rag_debug", {})
+                            state["rag_debug"]["error"] = "no_documents_found"
+                            state["rag_debug"]["error_message"] = f"No documents found at {documents_path}"
+                            state["rag_debug"]["index_created"] = False
+                            logger.warning("No documents found at %s", documents_path)
+                            state["rag_context"] = None
+                            return state
                 else:
-                    state["rag_context"] = f"[Documents directory not found: {documents_path}]"
-                    return state
+                        # Record error in debug but do not inject error text into rag_context
+                        state.setdefault("rag_debug", {})
+                        state["rag_debug"]["error"] = "documents_directory_not_found"
+                        state["rag_debug"]["error_message"] = f"Documents directory not found: {documents_path}"
+                        logger.warning("Documents directory not found: %s", documents_path)
+                        # Leave rag_context as None so AI model won't receive an error string as context
+                        state["rag_context"] = None
+                        return state
 
             # Query the vector store
             docs_and_scores = vectorstore.similarity_search_with_score(query, k=top_k)
+            state["rag_debug"]["results_requested"] = top_k
 
             # Format context
             context_parts = []
@@ -506,8 +582,18 @@ class NodeProcessors:
 
             if context_parts:
                 state["rag_context"] = "\n\n".join(context_parts)
+                state["rag_debug"]["results_count"] = len(context_parts)
+                # Log a short preview of the retrieved context
+                try:
+                    preview = state["rag_context"].replace("\n", " ")[:800]
+                    logger.info("RAG provided context: results_count=%s preview=%s", len(context_parts), preview)
+                except Exception:
+                    logger.exception("Error logging RAG context preview")
             else:
-                state["rag_context"] = "[No relevant documents found]"
+                    # No relevant documents found - don't set an error string into rag_context
+                    state["rag_debug"]["results_count"] = 0
+                    state["rag_debug"]["note"] = "no_relevant_documents"
+                    state["rag_context"] = None
 
         except Exception as e:
             logger.exception("Error in RAG processing")
@@ -599,7 +685,16 @@ class WorkflowExecutor:
         self.processors = NodeProcessors()
     
     def _build_graph(self, workflow) -> StateGraph:
-        """Build a LangGraph from workflow configuration."""
+        """Build a LangGraph from workflow configuration.
+        
+        Special handling for RAG nodes:
+        - RAG nodes provide context to AI models
+        - When RAG connects to AI model's context port, RAG runs first
+        - RAG populates state["rag_context"] which AI model consumes
+        
+        IMPORTANT: LangGraph requires sequential execution - no parallel branches
+        that write to the same state keys. We must build a linear chain.
+        """
         
         # Create state graph
         graph = StateGraph(WorkflowState)
@@ -608,31 +703,40 @@ class WorkflowExecutor:
         nodes = {n.id: n for n in workflow.nodes}
         connections = workflow.connections
         
-        # Build adjacency list with port info for conditional routing
-        # Structure: {source_id: [(target_id, source_port_id), ...]}
-        adjacency_with_ports: Dict[str, List[tuple]] = {n.id: [] for n in workflow.nodes}
+        # Build adjacency list with port info
+        # Structure: {source_id: [(target_id, source_port_id, target_port_id), ...]}
+        adjacency: Dict[str, List[tuple]] = {n.id: [] for n in workflow.nodes}
+        incoming: Dict[str, List[tuple]] = {n.id: [] for n in workflow.nodes}
+        
         for conn in connections:
-            adjacency_with_ports[conn.sourceNodeId].append((conn.targetNodeId, conn.sourcePortId))
+            source_port = conn.sourcePortId if hasattr(conn, 'sourcePortId') else getattr(conn, 'source_port_id', '')
+            target_port = conn.targetPortId if hasattr(conn, 'targetPortId') else getattr(conn, 'target_port_id', '')
+            adjacency[conn.sourceNodeId].append((conn.targetNodeId, source_port, target_port))
+            incoming[conn.targetNodeId].append((conn.sourceNodeId, source_port, target_port))
         
-        # Find entry nodes (nodes with no incoming connections)
-        incoming = {n.id: 0 for n in workflow.nodes}
-        for conn in connections:
-            incoming[conn.targetNodeId] += 1
-        
-        entry_nodes = [nid for nid, count in incoming.items() if count == 0]
-        exit_nodes = [nid for nid, targets in adjacency_with_ports.items() if not targets]
-        
-        # Identify if-condition nodes for conditional routing
+        # Identify node types
         if_condition_nodes = {nid for nid, node in nodes.items() if node.type == "if-condition"}
+        rag_nodes = {nid for nid, node in nodes.items() if node.type == "rag-documents"}
+        ai_model_nodes = {nid for nid, node in nodes.items() if node.type == "ai-model"}
+        input_nodes = {nid for nid, node in nodes.items() if node.type in ("text-input", "voice-input")}
         
-        # Add nodes to graph
+        # Find which RAG nodes connect to which AI models (via context port)
+        rag_to_ai: Dict[str, str] = {}  # rag_id -> ai_id
+        ai_from_rag: Dict[str, str] = {}  # ai_id -> rag_id
+        for rag_id in rag_nodes:
+            for target_id, source_port, target_port in adjacency.get(rag_id, []):
+                if target_id in ai_model_nodes:
+                    rag_to_ai[rag_id] = target_id
+                    ai_from_rag[target_id] = rag_id
+        
+        logger.info(f"RAG to AI mappings: {rag_to_ai}")
+        
+        # Add all nodes to graph
         for node_id, node in nodes.items():
             processor = self._get_processor(node.type)
             if processor:
-                # Create a closure to capture node data and node_id
                 def make_node_fn(proc, data, nid):
                     def node_fn(state: WorkflowState) -> WorkflowState:
-                        # Pass node_id in data for condition tracking
                         data_with_id = {**data, "id": nid} if isinstance(data, dict) else {"id": nid}
                         return proc(state, data_with_id)
                     return node_fn
@@ -640,62 +744,107 @@ class WorkflowExecutor:
                 node_data = node.data if hasattr(node, 'data') else {}
                 graph.add_node(node_id, make_node_fn(processor, node_data, node_id))
         
-        # Add edges - handle if-condition nodes specially
-        for source_id, targets_with_ports in adjacency_with_ports.items():
-            if not targets_with_ports:
+        # Build edges - must be LINEAR to avoid concurrent updates
+        # Strategy: For each AI model that has a RAG connection, ensure:
+        #   input → RAG → AI model (not input → AI model AND RAG → AI model in parallel)
+        
+        added_edges = set()
+        
+        for source_id, targets in adjacency.items():
+            if not targets:
                 continue
-                
+            
+            source_node = nodes[source_id]
+            
             if source_id in if_condition_nodes:
-                # For if-condition nodes, use conditional edges
-                # Find true and false targets based on port IDs
-                true_targets = [t for t, port in targets_with_ports if "true" in port.lower()]
-                false_targets = [t for t, port in targets_with_ports if "false" in port.lower()]
+                # Conditional routing for if-condition nodes
+                true_targets = [t for t, sport, _ in targets if "true" in sport.lower()]
+                false_targets = [t for t, sport, _ in targets if "false" in sport.lower()]
                 
-                # Create conditional router function
-                def make_condition_router(node_id, true_tgts, false_tgts):
+                def make_router(node_id, true_tgts, false_tgts):
                     def router(state: WorkflowState) -> str:
-                        # Get the condition result for this node
                         result = state.get("condition_results", {}).get(node_id, False)
-                        logger.info(f"Routing from {node_id}: condition={result}, true_targets={true_tgts}, false_targets={false_tgts}")
+                        logger.info(f"Routing from {node_id}: condition={result}")
                         if result and true_tgts:
-                            return true_tgts[0]  # Return first true target
+                            return true_tgts[0]
                         elif not result and false_tgts:
-                            return false_tgts[0]  # Return first false target
-                        elif true_tgts:
-                            return true_tgts[0]  # Fallback to true
-                        elif false_tgts:
-                            return false_tgts[0]  # Fallback to false
+                            return false_tgts[0]
                         return END
                     return router
                 
-                # Build the mapping of possible destinations
-                route_map = {}
-                for target, port in targets_with_ports:
-                    if target in nodes:
-                        route_map[target] = target
+                route_map = {t: t for t, _, _ in targets if t in nodes}
                 route_map[END] = END
                 
                 if route_map:
                     graph.add_conditional_edges(
                         source_id,
-                        make_condition_router(source_id, true_targets, false_targets),
+                        make_router(source_id, true_targets, false_targets),
                         route_map
                     )
-            else:
-                # For regular nodes, add normal edges
-                # If multiple targets, just use the first one (shouldn't happen in normal workflows)
-                for target_id, _ in targets_with_ports:
-                    if target_id in nodes:
+                    for t, _, _ in targets:
+                        added_edges.add((source_id, t))
+                        
+            elif source_id in input_nodes:
+                # Input node: check if any target AI model has a RAG feeding into it
+                for target_id, _, target_port in targets:
+                    if target_id in ai_model_nodes and target_id in ai_from_rag:
+                        # This AI model has RAG - route input → RAG instead of input → AI
+                        rag_id = ai_from_rag[target_id]
+                        if (source_id, rag_id) not in added_edges:
+                            graph.add_edge(source_id, rag_id)
+                            added_edges.add((source_id, rag_id))
+                            logger.info(f"Redirected input→AI to input→RAG: {source_id} → {rag_id}")
+                    elif target_id in rag_nodes:
+                        # Direct input → RAG connection
+                        if (source_id, target_id) not in added_edges:
+                            graph.add_edge(source_id, target_id)
+                            added_edges.add((source_id, target_id))
+                    else:
+                        # Normal connection
+                        if (source_id, target_id) not in added_edges:
+                            graph.add_edge(source_id, target_id)
+                            added_edges.add((source_id, target_id))
+                            
+            elif source_id in rag_nodes:
+                # RAG node: connect to its AI model target
+                for target_id, _, _ in targets:
+                    if (source_id, target_id) not in added_edges:
                         graph.add_edge(source_id, target_id)
-                        break  # Only add one edge for non-conditional nodes
+                        added_edges.add((source_id, target_id))
+                        logger.info(f"Added RAG→target edge: {source_id} → {target_id}")
+            else:
+                # Other nodes: add edges normally
+                for target_id, _, _ in targets:
+                    if (source_id, target_id) not in added_edges:
+                        graph.add_edge(source_id, target_id)
+                        added_edges.add((source_id, target_id))
         
-        # Set entry point
-        if entry_nodes:
-            graph.set_entry_point(entry_nodes[0])
+        # Find entry nodes (no incoming edges after our modifications)
+        # An entry node is one with no incoming connections in the ORIGINAL graph
+        original_incoming_count = {n.id: 0 for n in workflow.nodes}
+        for conn in connections:
+            original_incoming_count[conn.targetNodeId] += 1
         
-        # Set finish points for nodes with no outgoing edges
+        entry_candidates = [nid for nid, count in original_incoming_count.items() if count == 0]
+        
+        # Prefer input nodes as entry, then RAG if no input
+        input_entries = [nid for nid in entry_candidates if nid in input_nodes]
+        rag_entries = [nid for nid in entry_candidates if nid in rag_nodes]
+        
+        if input_entries:
+            graph.set_entry_point(input_entries[0])
+            logger.info(f"Entry point: {input_entries[0]} (input node)")
+        elif rag_entries:
+            graph.set_entry_point(rag_entries[0])
+            logger.info(f"Entry point: {rag_entries[0]} (RAG node)")
+        elif entry_candidates:
+            graph.set_entry_point(entry_candidates[0])
+            logger.info(f"Entry point: {entry_candidates[0]}")
+        
+        # Find exit nodes (no outgoing edges)
+        exit_nodes = [nid for nid, targets in adjacency.items() if not targets]
         for exit_node in exit_nodes:
-            if exit_node not in if_condition_nodes:  # Conditional edges already handle END
+            if exit_node not in if_condition_nodes:
                 graph.add_edge(exit_node, END)
         
         return graph
@@ -756,6 +905,8 @@ class WorkflowExecutor:
                 "response": final_state.get("response", "No response generated"),
                 "nodes_executed": final_state.get("nodes_executed", []),
                 "model_used": final_state.get("model_used"),
+                # Expose rag debug info to help troubleshooting RAG connectivity
+                "rag_debug": final_state.get("rag_debug", {}),
             }
         except Exception as e:
             logger.exception("Error executing workflow")
