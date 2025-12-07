@@ -315,6 +315,7 @@ export default function ModelConfig() {
         return (
           <RAGDocumentConfigPanel
             data={configPanelNode.data as RAGDocumentData}
+            projectId={projectId || ''}
             onSave={(data) => handleConfigSave(configPanelNode.id, data)}
             onClose={() => setConfigPanelNode(null)}
           />

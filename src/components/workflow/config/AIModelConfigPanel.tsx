@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, Bot, Key, Thermometer, Hash, MessageSquare } from 'lucide-react';
+import { X, Bot, Key, Thermometer, Hash, MessageSquare, FileOutput, Variable } from 'lucide-react';
 import type { AIModelData } from '../../../types/workflow';
 
 interface AIModelConfigPanelProps {
@@ -9,34 +9,23 @@ interface AIModelConfigPanelProps {
   onClose: () => void;
 }
 
+// Only OpenAI for now - can be extended later
 const providers = [
-  { id: 'openai', name: 'OpenAI', models: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
-  { id: 'anthropic', name: 'Anthropic', models: ['claude-3-opus', 'claude-3-sonnet', 'claude-3-haiku'] },
-  { id: 'google', name: 'Google', models: ['gemini-pro', 'gemini-pro-vision'] },
-  { id: 'custom', name: 'Custom', models: [] },
+  { id: 'openai', name: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'] },
 ];
 
 export default function AIModelConfigPanel({ data, onSave, onClose }: AIModelConfigPanelProps) {
-  const [formData, setFormData] = useState<AIModelData>(data);
-  const [customModel, setCustomModel] = useState('');
+  const [formData, setFormData] = useState<AIModelData>({
+    ...data,
+    provider: 'openai', // Force OpenAI for now
+    expectedOutput: data.expectedOutput || '',
+    outputVariable: data.outputVariable || 'ai_response',
+  });
 
   const currentProvider = providers.find((p) => p.id === formData.provider);
 
-  const handleProviderChange = (providerId: string) => {
-    const provider = providers.find((p) => p.id === providerId) as typeof providers[0];
-    setFormData({
-      ...formData,
-      provider: providerId as AIModelData['provider'],
-      modelName: provider.models[0] || '',
-    });
-  };
-
   const handleSave = () => {
-    const finalData = {
-      ...formData,
-      modelName: formData.provider === 'custom' ? customModel : formData.modelName,
-    };
-    onSave(finalData);
+    onSave(formData);
   };
 
   return (
@@ -59,22 +48,17 @@ export default function AIModelConfigPanel({ data, onSave, onClose }: AIModelCon
 
       {/* Form */}
       <div className="p-4 space-y-6">
-        {/* Provider Selection */}
+        {/* Provider (OpenAI only for now) */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Provider
           </label>
-          <select
-            value={formData.provider}
-            onChange={(e) => handleProviderChange(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-          >
-            {providers.map((provider) => (
-              <option key={provider.id} value={provider.id}>
-                {provider.name}
-              </option>
-            ))}
-          </select>
+          <div className="px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-700">
+            OpenAI
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            Currently only OpenAI is supported. More providers coming soon.
+          </p>
         </div>
 
         {/* Model Selection */}
@@ -82,27 +66,17 @@ export default function AIModelConfigPanel({ data, onSave, onClose }: AIModelCon
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Model
           </label>
-          {formData.provider === 'custom' ? (
-            <input
-              type="text"
-              value={customModel}
-              onChange={(e) => setCustomModel(e.target.value)}
-              placeholder="Enter custom model endpoint"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-            />
-          ) : (
-            <select
-              value={formData.modelName}
-              onChange={(e) => setFormData({ ...formData, modelName: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-            >
-              {currentProvider?.models.map((model) => (
-                <option key={model} value={model}>
-                  {model}
-                </option>
-              ))}
-            </select>
-          )}
+          <select
+            value={formData.modelName}
+            onChange={(e) => setFormData({ ...formData, modelName: e.target.value })}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          >
+            {currentProvider?.models.map((model) => (
+              <option key={model} value={model}>
+                {model}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* System Prompt */}
@@ -120,6 +94,42 @@ export default function AIModelConfigPanel({ data, onSave, onClose }: AIModelCon
           />
           <p className="mt-1 text-xs text-gray-500">
             Define how the AI should behave and respond to callers.
+          </p>
+        </div>
+
+        {/* Expected Output Format */}
+        <div className="p-3 bg-purple-50 rounded-lg border border-purple-100">
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+            <FileOutput className="w-4 h-4 text-purple-600" />
+            Expected Output Format
+          </label>
+          <input
+            type="text"
+            value={formData.expectedOutput || ''}
+            onChange={(e) => setFormData({ ...formData, expectedOutput: e.target.value })}
+            placeholder="e.g., YES or NO, 1-10, positive/negative/neutral"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            Describe the expected output format. This helps guide the AI and enables if-condition matching.
+          </p>
+        </div>
+
+        {/* Output Variable Name */}
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+            <Variable className="w-4 h-4" />
+            Output Variable Name
+          </label>
+          <input
+            type="text"
+            value={formData.outputVariable || 'ai_response'}
+            onChange={(e) => setFormData({ ...formData, outputVariable: e.target.value })}
+            placeholder="ai_response"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono text-sm"
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            Use this variable in If-Condition nodes to check the AI's response.
           </p>
         </div>
 

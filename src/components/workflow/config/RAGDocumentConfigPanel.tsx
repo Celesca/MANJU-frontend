@@ -1,10 +1,13 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { X, FileText, Upload, Trash2, File, FileIcon } from 'lucide-react';
+import { X, FileText, Upload, Trash2, File, FileIcon, Loader2, CheckCircle, AlertCircle, RefreshCw, Zap } from 'lucide-react';
 import type { RAGDocumentData, UploadedDocument } from '../../../types/workflow';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
 interface RAGDocumentConfigPanelProps {
   data: RAGDocumentData;
+  projectId: string;
   onSave: (data: RAGDocumentData) => void;
   onClose: () => void;
 }
@@ -15,30 +18,128 @@ const fileTypeIcons: Record<string, React.ReactNode> = {
   txt: <FileText className="w-8 h-8 text-gray-500" />,
 };
 
-export default function RAGDocumentConfigPanel({ data, onSave, onClose }: RAGDocumentConfigPanelProps) {
+const statusIcons: Record<string, React.ReactNode> = {
+  uploading: <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />,
+  processing: <RefreshCw className="w-4 h-4 text-yellow-500 animate-spin" />,
+  ready: <CheckCircle className="w-4 h-4 text-green-500" />,
+  error: <AlertCircle className="w-4 h-4 text-red-500" />,
+};
+
+export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClose }: RAGDocumentConfigPanelProps) {
   const [formData, setFormData] = useState<RAGDocumentData>(data);
   const [isDragging, setIsDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [embedding, setEmbedding] = useState(false);
+  const [embedStatus, setEmbedStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [embedMessage, setEmbedMessage] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileSelect = (files: FileList | null) => {
-    if (!files) return;
+  const embedDocuments = useCallback(async () => {
+    if (!projectId || formData.documents.length === 0) return;
+    
+    setEmbedding(true);
+    setEmbedStatus('idle');
+    setEmbedMessage('');
 
-    const newDocuments: UploadedDocument[] = Array.from(files).map((file) => {
-      const ext = file.name.split('.').pop()?.toLowerCase() as 'pdf' | 'docx' | 'txt';
-      return {
-        id: `doc-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        name: file.name,
-        type: ext,
-        size: file.size,
-        uploadedAt: new Date().toISOString(),
-        status: 'ready' as const, // Mock - would be 'uploading' in real implementation
-      };
-    });
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/${projectId}/documents/embed`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
 
-    setFormData({
-      ...formData,
-      documents: [...formData.documents, ...newDocuments],
-    });
+      const result = await res.json();
+
+      if (!res.ok) {
+        throw new Error(result.error || 'Embedding failed');
+      }
+
+      setEmbedStatus('success');
+      setEmbedMessage(result.message || 'Documents embedded successfully!');
+    } catch (error) {
+      console.error('Embed error:', error);
+      setEmbedStatus('error');
+      setEmbedMessage(error instanceof Error ? error.message : 'Embedding failed');
+    } finally {
+      setEmbedding(false);
+    }
+  }, [projectId, formData.documents.length]);
+
+  const uploadFile = useCallback(async (file: File): Promise<UploadedDocument | null> => {
+    const ext = file.name.split('.').pop()?.toLowerCase() as 'pdf' | 'docx' | 'txt';
+    const docId = `doc-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Create initial document entry with uploading status
+    const newDoc: UploadedDocument = {
+      id: docId,
+      name: file.name,
+      type: ext,
+      size: file.size,
+      uploadedAt: new Date().toISOString(),
+      status: 'uploading',
+    };
+
+    // Add to state immediately
+    setFormData(prev => ({
+      ...prev,
+      documents: [...prev.documents, newDoc],
+    }));
+
+    try {
+      // Create FormData for upload
+      const formDataUpload = new FormData();
+      formDataUpload.append('file', file);
+      formDataUpload.append('documentId', docId);
+
+      const res = await fetch(`${API_BASE}/api/projects/${projectId}/documents`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formDataUpload,
+      });
+
+      if (!res.ok) {
+        throw new Error('Upload failed');
+      }
+
+      const result = await res.json();
+
+      // Update document status to processing/ready
+      setFormData(prev => ({
+        ...prev,
+        documents: prev.documents.map(d => 
+          d.id === docId 
+            ? { ...d, status: result.status || 'ready', id: result.id || docId }
+            : d
+        ),
+      }));
+
+      return { ...newDoc, status: 'ready', id: result.id || docId };
+    } catch (error) {
+      console.error('Upload error:', error);
+      // Update status to error
+      setFormData(prev => ({
+        ...prev,
+        documents: prev.documents.map(d => 
+          d.id === docId ? { ...d, status: 'error' } : d
+        ),
+      }));
+      return null;
+    }
+  }, [projectId]);
+
+  const handleFileSelect = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    setUploading(true);
+    
+    // Upload files one by one
+    for (const file of Array.from(files)) {
+      await uploadFile(file);
+    }
+    
+    setUploading(false);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -56,7 +157,18 @@ export default function RAGDocumentConfigPanel({ data, onSave, onClose }: RAGDoc
     handleFileSelect(e.dataTransfer.files);
   };
 
-  const handleRemoveDocument = (docId: string) => {
+  const handleRemoveDocument = async (docId: string) => {
+    try {
+      // Call backend to delete
+      await fetch(`${API_BASE}/api/projects/${projectId}/documents/${docId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+    } catch (error) {
+      console.error('Delete error:', error);
+    }
+
+    // Remove from local state
     setFormData({
       ...formData,
       documents: formData.documents.filter((d) => d.id !== docId),
@@ -134,26 +246,85 @@ export default function RAGDocumentConfigPanel({ data, onSave, onClose }: RAGDoc
               {formData.documents.map((doc) => (
                 <div
                   key={doc.id}
-                  className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg"
+                  className={`flex items-center gap-3 p-3 rounded-lg ${
+                    doc.status === 'error' ? 'bg-red-50' : 'bg-gray-50'
+                  }`}
                 >
-                  {fileTypeIcons[doc.type]}
+                  {fileTypeIcons[doc.type] || <FileText className="w-8 h-8 text-gray-500" />}
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-gray-800 truncate">
                       {doc.name}
                     </div>
-                    <div className="text-xs text-gray-500">
-                      {formatFileSize(doc.size)} • {doc.status}
+                    <div className="text-xs text-gray-500 flex items-center gap-1">
+                      {formatFileSize(doc.size)} • 
+                      <span className="flex items-center gap-1">
+                        {statusIcons[doc.status]}
+                        {doc.status}
+                      </span>
                     </div>
                   </div>
                   <button
                     onClick={() => handleRemoveDocument(doc.id)}
                     className="p-1 hover:bg-red-100 rounded text-red-500"
+                    disabled={doc.status === 'uploading' || doc.status === 'processing'}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Upload Progress Indicator */}
+        {uploading && (
+          <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg">
+            <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+            <span className="text-sm text-blue-700">Uploading documents...</span>
+          </div>
+        )}
+
+        {/* Embed Documents Button */}
+        {formData.documents.length > 0 && formData.documents.some(d => d.status === 'ready') && (
+          <div className="space-y-2">
+            <button
+              onClick={embedDocuments}
+              disabled={embedding}
+              className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg transition-colors ${
+                embedding 
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                  : 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700'
+              }`}
+            >
+              {embedding ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Embedding documents...</span>
+                </>
+              ) : (
+                <>
+                  <Zap className="w-5 h-5" />
+                  <span>Embed Documents with FAISS</span>
+                </>
+              )}
+            </button>
+            
+            {embedStatus !== 'idle' && (
+              <div className={`flex items-center gap-2 p-3 rounded-lg ${
+                embedStatus === 'success' ? 'bg-green-50' : 'bg-red-50'
+              }`}>
+                {embedStatus === 'success' ? (
+                  <CheckCircle className="w-5 h-5 text-green-600" />
+                ) : (
+                  <AlertCircle className="w-5 h-5 text-red-600" />
+                )}
+                <span className={`text-sm ${
+                  embedStatus === 'success' ? 'text-green-700' : 'text-red-700'
+                }`}>
+                  {embedMessage}
+                </span>
+              </div>
+            )}
           </div>
         )}
 

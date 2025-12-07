@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, GitBranch, Save, HelpCircle } from 'lucide-react';
+import { X, GitBranch, Save, HelpCircle, Variable, MessageSquare, Bot } from 'lucide-react';
 import type { IfConditionData } from '../../../types/workflow';
 
 interface IfConditionConfigPanelProps {
@@ -10,13 +10,20 @@ interface IfConditionConfigPanelProps {
 }
 
 const conditionTypes = [
-  { value: 'contains', label: 'Contains', description: 'Check if input contains a value' },
-  { value: 'equals', label: 'Equals', description: 'Check if input exactly matches' },
-  { value: 'startsWith', label: 'Starts With', description: 'Check if input starts with a value' },
-  { value: 'endsWith', label: 'Ends With', description: 'Check if input ends with a value' },
+  { value: 'contains', label: 'Contains', description: 'Check if text contains a value' },
+  { value: 'equals', label: 'Equals', description: 'Check if text exactly matches' },
+  { value: 'startsWith', label: 'Starts With', description: 'Check if text starts with a value' },
+  { value: 'endsWith', label: 'Ends With', description: 'Check if text ends with a value' },
+  { value: 'isYes', label: 'Is Affirmative (Yes)', description: 'Check if response is yes/true/affirmative' },
+  { value: 'isNo', label: 'Is Negative (No)', description: 'Check if response is no/false/negative' },
   { value: 'regex', label: 'Regex', description: 'Match using regular expression' },
   { value: 'custom', label: 'Custom Expression', description: 'Write a custom JavaScript expression' },
 ] as const;
+
+const fieldOptions = [
+  { value: 'message', label: 'User Message', icon: MessageSquare, description: 'Check the user\'s input' },
+  { value: 'response', label: 'AI Response', icon: Bot, description: 'Check the AI model\'s output' },
+];
 
 export default function IfConditionConfigPanel({
   data,
@@ -28,6 +35,7 @@ export default function IfConditionConfigPanel({
     conditionValue: data.conditionValue || '',
     caseSensitive: data.caseSensitive || false,
     customExpression: data.customExpression || '',
+    field: data.field || 'response',
   });
 
   const handleSave = () => {
@@ -70,6 +78,41 @@ export default function IfConditionConfigPanel({
           </div>
         </div>
 
+        {/* Field to Check */}
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+            <Variable className="w-4 h-4" />
+            Check Value From
+          </label>
+          <div className="space-y-2">
+            {fieldOptions.map((option) => {
+              const Icon = option.icon;
+              return (
+                <button
+                  key={option.value}
+                  onClick={() => setFormData({ ...formData, field: option.value })}
+                  className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-colors text-left ${
+                    formData.field === option.value
+                      ? 'border-yellow-500 bg-yellow-50'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <Icon className={`w-5 h-5 ${formData.field === option.value ? 'text-yellow-600' : 'text-gray-400'}`} />
+                  <div>
+                    <div className={`font-medium ${formData.field === option.value ? 'text-yellow-700' : 'text-gray-700'}`}>
+                      {option.label}
+                    </div>
+                    <div className="text-xs text-gray-500">{option.description}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-xs text-gray-500">
+            💡 To check AI output, use "AI Response" with conditions like "Is Affirmative" or "Equals".
+          </p>
+        </div>
+
         {/* Condition Type */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -94,8 +137,8 @@ export default function IfConditionConfigPanel({
           </p>
         </div>
 
-        {/* Condition Value */}
-        {formData.conditionType !== 'custom' && (
+        {/* Condition Value - not needed for isYes/isNo */}
+        {formData.conditionType !== 'custom' && formData.conditionType !== 'isYes' && formData.conditionType !== 'isNo' && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Value to Match

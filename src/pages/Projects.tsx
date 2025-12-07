@@ -172,7 +172,7 @@ export default function Projects() {
   };
 
   // Navigate with unsaved guard: shows SweetAlert with options Save / Leave without saving / Cancel
-  const navigateWithGuard = async (to: string, projectId?: string) => {
+  const navigateWithGuard = async (to: string, _projectId?: string) => {
     if (!editingId) {
       navigate(to);
       return;

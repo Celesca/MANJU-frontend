@@ -118,6 +118,7 @@ export const nodeTemplates: NodeTemplate[] = [
       conditionValue: '',
       caseSensitive: false,
       customExpression: '',
+      field: 'response', // Default to checking AI response
     },
     defaultInputs: [{ id: 'value-in', type: 'input', position: 'left', label: 'Input' }],
     defaultOutputs: [
