@@ -7,8 +7,8 @@ import Aurora from '../components/Backgound';
 //  - GET /auth/callback/google -> Google redirects here, server handles token exchange
 // Frontend simply redirects the browser to the backend login route.
 
-// The backend registers auth routes under `/api` (see `main.go`), so point there.
-const BACKEND_LOGIN = 'http://localhost:8080/auth/login/google';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8080';
+const BACKEND_LOGIN = `${API_BASE}/auth/login/google`;
 
 export default function Login() {
   return (

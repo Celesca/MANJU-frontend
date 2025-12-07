@@ -10,7 +10,9 @@ export function useAuth() {
     let mounted = true;
     (async () => {
       try {
-        const res = await fetch('/api/auth/me', { credentials: 'include' });
+        const API_BASE = (import.meta.env.VITE_API_URL as string) || '';
+        const url = API_BASE ? `${API_BASE}/auth/me` : '/auth/me';
+        const res = await fetch(url, { credentials: 'include' });
         if (!mounted) return;
         if (!res.ok) {
           setUser(null);

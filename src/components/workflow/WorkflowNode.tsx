@@ -24,6 +24,8 @@ const nodeIcons: Record<NodeType, React.ReactNode> = {
   'google-sheets': <Table className="w-5 h-5" />,
   'voice-input': <Mic className="w-5 h-5" />,
   'voice-output': <Volume2 className="w-5 h-5" />,
+  'text-input': <FileText className="w-5 h-5" />,
+  'text-output': <FileText className="w-5 h-5" />,
   'if-condition': <GitBranch className="w-5 h-5" />,
 };
 
@@ -33,6 +35,8 @@ const nodeColors: Record<NodeType, { bg: string; border: string; icon: string }>
   'google-sheets': { bg: 'bg-green-50', border: 'border-green-300', icon: 'text-green-600' },
   'voice-input': { bg: 'bg-orange-50', border: 'border-orange-300', icon: 'text-orange-600' },
   'voice-output': { bg: 'bg-pink-50', border: 'border-pink-300', icon: 'text-pink-600' },
+  'text-input': { bg: 'bg-gray-50', border: 'border-gray-300', icon: 'text-gray-700' },
+  'text-output': { bg: 'bg-gray-50', border: 'border-gray-300', icon: 'text-gray-700' },
   'if-condition': { bg: 'bg-yellow-50', border: 'border-yellow-300', icon: 'text-yellow-600' },
 };
 
@@ -42,6 +46,8 @@ const nodeLabels: Record<NodeType, string> = {
   'google-sheets': 'Google Sheets',
   'voice-input': 'Voice Input',
   'voice-output': 'Voice Output',
+  'text-input': 'Text Input',
+  'text-output': 'Text Output',
   'if-condition': 'If Condition',
 };
 
@@ -218,12 +224,30 @@ function NodePreview({ node }: { node: WorkflowNode }) {
         </div>
       );
     }
+    case 'text-input': {
+      const data = node.data as import('../../types/workflow').TextInputData;
+      return (
+        <div className="text-xs text-gray-600">
+          <div className="truncate">Placeholder: {data.placeholder || 'Enter text...'}</div>
+          <div>Multiline: {data.allowMultiline ? 'Yes' : 'No'}</div>
+        </div>
+      );
+    }
     case 'voice-output': {
       const data = node.data as import('../../types/workflow').VoiceOutputData;
       return (
         <div className="text-xs text-gray-600">
           <div>Voice: {data.voice}</div>
           <div>Speed: {data.speed}x</div>
+        </div>
+      );
+    }
+    case 'text-output': {
+      const data = node.data as import('../../types/workflow').TextOutputData;
+      return (
+        <div className="text-xs text-gray-600">
+          <div>Format: {data.format}</div>
+          <div>Truncate: {data.truncateLength ? `${data.truncateLength} chars` : 'No'}</div>
         </div>
       );
     }
