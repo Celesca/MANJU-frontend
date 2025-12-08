@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    volumes:
+      - ./backend:/app
+      - ./backend/uploads:/app/uploads
+    working_dir: /app
+    command: sh -c "go mod download && go run ./main.go"
+    ports:
+      - "8080:8080"
+    environment:
+      - FRONTEND_URL=http://localhost:5173
+      - DISABLE_AUTH=${DISABLE_AUTH}
+      - DEV_USER_ID=${DEV_USER_ID}
+      - POSTGRES_HOST=db
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - AI_SERVICE_URL=http://ai:8000
+    depends_on:
+      - db
+      - ai
+
+  ai:
+    build:
+      context: ./ai_backend
+      dockerfile: Dockerfile
+    volumes:
+      - ./ai_backend:/app
+      - ./ai_backend/faiss_indexes:/app/faiss_indexes
+      - ./backend/uploads/documents:/app/backend/uploads/documents
+    working_dir: /app
+    command: sh -c "pip install -r requirements.txt || true && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "8000:8000"
+    environment:
+      - AI_SERVICE_PORT=8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - FAISS_INDEX_PATH=/app/faiss_indexes
+      - DOCUMENTS_STORAGE_PATH=/app/backend/uploads/documents
+    depends_on:
+      - db
+
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  pgdata:
