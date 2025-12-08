@@ -15,6 +15,7 @@ interface WorkflowCanvasProps {
   onDrop: (template: NodeTemplate, position: Position) => void;
   onConnectionCreate: (connection: Omit<Connection, 'id'>) => void;
   onConnectionDelete?: (connectionId: string) => void;
+  onUndo?: () => void;
 }
 
 export default function WorkflowCanvas({
@@ -28,6 +29,7 @@ export default function WorkflowCanvas({
   onDrop,
   onConnectionCreate,
   onConnectionDelete,
+  onUndo,
 }: WorkflowCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
@@ -61,6 +63,7 @@ export default function WorkflowCanvas({
   const [marqueeEnd, setMarqueeEnd] = useState<{ x: number; y: number } | null>(null);
   // Track selection before marquee so we can preview live selection (additive with Ctrl/Cmd)
   const marqueeBaseSelectionRef = useRef<Set<string>>(new Set());
+  const marqueeBaseConnectionsRef = useRef<Set<string>>(new Set());
   const [marqueeAdditive, setMarqueeAdditive] = useState(false);
 
   // Handle zoom
@@ -101,10 +104,12 @@ export default function WorkflowCanvas({
       setIsMarqueeSelecting(true);
       setMarqueeStart({ x, y });
       setMarqueeEnd({ x, y });
-      setMarqueeAdditive(e.ctrlKey || e.metaKey);
+      const additive = e.ctrlKey || e.metaKey;
+      setMarqueeAdditive(additive);
       marqueeBaseSelectionRef.current = new Set(selectedNodeIds);
-      // If not additive, clear current node selection immediately for live preview
-      if (!(e.ctrlKey || e.metaKey)) {
+      marqueeBaseConnectionsRef.current = new Set(selectedConnectionIds);
+      // If not additive, clear current selection immediately for live preview
+      if (!additive) {
         setSelectedNodeIds(new Set());
         setSelectedConnectionIds(new Set());
         onNodeSelect(null);
@@ -273,6 +278,86 @@ export default function WorkflowCanvas({
              node.position.y > maxY);
   };
 
+  // Approximate connection intersection with marquee by sampling points along the cubic curve
+  const connectionIntersectsMarquee = (
+    conn: Connection,
+    marqStart: Position,
+    marqEnd: Position
+  ): boolean => {
+    const nodeWidth = 180;
+    const nodeHeight = 80;
+
+    const sourceNode = nodes.find((n) => n.id === conn.sourceNodeId);
+    const targetNode = nodes.find((n) => n.id === conn.targetNodeId);
+    if (!sourceNode || !targetNode) return false;
+
+    const rightOutputs = sourceNode.outputs.filter((p) => p.position !== 'bottom');
+    const sourcePortIndex = rightOutputs.findIndex((p) => p.id === conn.sourcePortId);
+
+    const targetPort = targetNode.inputs.find((p) => p.id === conn.targetPortId);
+    const leftInputs = targetNode.inputs.filter((p) => p.position !== 'bottom');
+    const bottomInputs = targetNode.inputs.filter((p) => p.position === 'bottom');
+    const targetPortIndex = leftInputs.findIndex((p) => p.id === conn.targetPortId);
+    const targetBottomIndex = bottomInputs.findIndex((p) => p.id === conn.targetPortId);
+
+    const sourceX = sourceNode.position.x + nodeWidth + 6;
+    const sourceY = sourceNode.position.y + 32 + Math.max(0, sourcePortIndex) * 28;
+
+    let targetX: number;
+    let targetY: number;
+    if (targetPort?.position === 'bottom') {
+      targetX = targetNode.position.x + 90 + targetBottomIndex * 40;
+      targetY = targetNode.position.y + nodeHeight + 6;
+    } else {
+      targetX = targetNode.position.x - 6;
+      targetY = targetNode.position.y + 32 + Math.max(0, targetPortIndex) * 28;
+    }
+
+    let ctrl1: Position;
+    let ctrl2: Position;
+    if (targetPort?.position === 'bottom') {
+      const midY = Math.max(sourceY, targetY + 50);
+      ctrl1 = { x: sourceX + 50, y: sourceY };
+      ctrl2 = { x: targetX, y: midY };
+    } else {
+      const midX = (sourceX + targetX) / 2;
+      ctrl1 = { x: midX, y: sourceY };
+      ctrl2 = { x: midX, y: targetY };
+    }
+
+    const minX = Math.min(marqStart.x, marqEnd.x);
+    const maxX = Math.max(marqStart.x, marqEnd.x);
+    const minY = Math.min(marqStart.y, marqEnd.y);
+    const maxY = Math.max(marqStart.y, marqEnd.y);
+
+    // Sample 20 points along the curve and see if any fall within marquee bounds (with small padding)
+    const padding = 4;
+    for (let i = 0; i <= 20; i++) {
+      const t = i / 20;
+      const x =
+        Math.pow(1 - t, 3) * sourceX +
+        3 * Math.pow(1 - t, 2) * t * ctrl1.x +
+        3 * (1 - t) * Math.pow(t, 2) * ctrl2.x +
+        Math.pow(t, 3) * targetX;
+      const y =
+        Math.pow(1 - t, 3) * sourceY +
+        3 * Math.pow(1 - t, 2) * t * ctrl1.y +
+        3 * (1 - t) * Math.pow(t, 2) * ctrl2.y +
+        Math.pow(t, 3) * targetY;
+
+      if (
+        x >= minX - padding &&
+        x <= maxX + padding &&
+        y >= minY - padding &&
+        y <= maxY + padding
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
   // Handle mouse move for node dragging, connection drawing, and marquee
   const handleCanvasMouseMove = (e: React.MouseEvent) => {
     if (isPanning) {
@@ -292,9 +377,17 @@ export default function WorkflowCanvas({
       // Live preview selection while dragging marquee
       const marqStart = marqueeStart ?? { x, y };
       const nodesInMarquee = nodes.filter(node => nodeIntersectsMarquee(node, marqStart, { x, y }));
+      const connectionsInMarquee = connections.filter(conn => connectionIntersectsMarquee(conn, marqStart, { x, y }));
+
       setSelectedNodeIds(() => {
         const base = marqueeAdditive ? new Set(marqueeBaseSelectionRef.current) : new Set<string>();
         nodesInMarquee.forEach(n => base.add(n.id));
+        return base;
+      });
+
+      setSelectedConnectionIds(() => {
+        const base = marqueeAdditive ? new Set(marqueeBaseConnectionsRef.current) : new Set<string>();
+        connectionsInMarquee.forEach(c => base.add(c.id));
         return base;
       });
       return;
@@ -325,6 +418,38 @@ export default function WorkflowCanvas({
     }
   };
 
+  const finalizeMarqueeSelection = (marqStart: Position, marqEnd: Position) => {
+    const nodesInMarquee = nodes.filter(node =>
+      nodeIntersectsMarquee(node, marqStart, marqEnd)
+    );
+    const connectionsInMarquee = connections.filter(conn =>
+      connectionIntersectsMarquee(conn, marqStart, marqEnd)
+    );
+
+    setSelectedNodeIds(() => {
+      const base = marqueeAdditive ? new Set(marqueeBaseSelectionRef.current) : new Set<string>();
+      nodesInMarquee.forEach(n => base.add(n.id));
+      return base;
+    });
+
+    setSelectedConnectionIds(() => {
+      const base = marqueeAdditive ? new Set(marqueeBaseConnectionsRef.current) : new Set<string>();
+      connectionsInMarquee.forEach(c => base.add(c.id));
+      return base;
+    });
+
+    if (nodesInMarquee.length > 0) {
+      onNodeSelect(nodesInMarquee[0].id);
+    } else if (!marqueeAdditive) {
+      onNodeSelect(null);
+    }
+
+    setIsMarqueeSelecting(false);
+    setMarqueeStart(null);
+    setMarqueeEnd(null);
+    setMarqueeAdditive(false);
+  };
+
   // Handle mouse up for connection completion, node drag end, and marquee selection
   const handleCanvasMouseUp = (e: React.MouseEvent) => {
     setIsPanning(false);
@@ -332,29 +457,7 @@ export default function WorkflowCanvas({
     
     // Finalize marquee selection
     if (isMarqueeSelecting && marqueeStart && marqueeEnd) {
-      // Find all nodes within marquee
-      const nodesInMarquee = nodes.filter(node =>
-        nodeIntersectsMarquee(node, marqueeStart, marqueeEnd)
-      );
-
-      // Finalize selection (already live-updated during drag)
-      setSelectedNodeIds(prev => {
-        const base = marqueeAdditive ? new Set(marqueeBaseSelectionRef.current) : new Set<string>();
-        nodesInMarquee.forEach(n => base.add(n.id));
-        return base;
-      });
-
-      // Update selected node for the side panel (use first node if any selected)
-      if (nodesInMarquee.length > 0) {
-        onNodeSelect(nodesInMarquee[0].id);
-      } else if (!marqueeAdditive) {
-        onNodeSelect(null);
-      }
-
-      setIsMarqueeSelecting(false);
-      setMarqueeStart(null);
-      setMarqueeEnd(null);
-      setMarqueeAdditive(false);
+      finalizeMarqueeSelection(marqueeStart, marqueeEnd);
       return;
     }
     
@@ -496,10 +599,16 @@ export default function WorkflowCanvas({
     });
   };
 
-  // Handle Backspace/Delete keyboard to remove selected nodes or connections
+  // Handle Backspace/Delete and Ctrl/Cmd+Z
   useEffect(() => {
     const handler = (ev: KeyboardEvent) => {
-      // Use Backspace or Delete
+      // Undo
+      if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') {
+        ev.preventDefault();
+        if (onUndo) onUndo();
+        return;
+      }
+
       if (ev.key === 'Backspace' || ev.key === 'Delete') {
         // Delete all selected nodes
         if (selectedNodeIds.size > 0) {
@@ -528,7 +637,7 @@ export default function WorkflowCanvas({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selectedNodeId, selectedNodeIds, selectedConnectionIds, onNodeDelete, onConnectionDelete]);
+  }, [selectedNodeId, selectedNodeIds, selectedConnectionIds, onNodeDelete, onConnectionDelete, onUndo]);
 
   return (
     <div className="relative flex-1 bg-gray-50 overflow-hidden">
@@ -621,9 +730,15 @@ export default function WorkflowCanvas({
           setIsDrawingConnection(false);
           setConnectionStart(null);
           setConnectionEnd(null);
-          setIsMarqueeSelecting(false);
-          setMarqueeStart(null);
-          setMarqueeEnd(null);
+
+          if (isMarqueeSelecting && marqueeStart && marqueeEnd) {
+            finalizeMarqueeSelection(marqueeStart, marqueeEnd);
+          } else {
+            setIsMarqueeSelecting(false);
+            setMarqueeStart(null);
+            setMarqueeEnd(null);
+            setMarqueeAdditive(false);
+          }
         }}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
