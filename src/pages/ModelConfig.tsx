@@ -155,6 +155,12 @@ export default function ModelConfig() {
     []
   );
 
+  // Handle connection deletion
+  const handleConnectionDelete = useCallback((connectionId: string) => {
+    setConnections((prev) => prev.filter((c) => c.id !== connectionId));
+    setHasUnsavedChanges(true);
+  }, []);
+
   // Handle config panel save
   const handleConfigSave = useCallback((nodeId: string, data: NodeData) => {
     setNodes((prev) =>
@@ -440,6 +446,7 @@ export default function ModelConfig() {
           onNodeDelete={handleNodeDelete}
           onDrop={handleDrop}
           onConnectionCreate={handleConnectionCreate}
+          onConnectionDelete={handleConnectionDelete}
         />
 
         {/* Config Panel */}
