@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ZoomIn, ZoomOut, Maximize2, Trash2 } from 'lucide-react';
 import WorkflowNode from './WorkflowNode';
@@ -14,6 +14,7 @@ interface WorkflowCanvasProps {
   onNodeDelete: (nodeId: string) => void;
   onDrop: (template: NodeTemplate, position: Position) => void;
   onConnectionCreate: (connection: Omit<Connection, 'id'>) => void;
+  onConnectionDelete?: (connectionId: string) => void;
 }
 
 export default function WorkflowCanvas({
@@ -26,6 +27,7 @@ export default function WorkflowCanvas({
   onNodeDelete,
   onDrop,
   onConnectionCreate,
+  onConnectionDelete,
 }: WorkflowCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
@@ -48,6 +50,8 @@ export default function WorkflowCanvas({
     y: number;
   } | null>(null);
   const [connectionEnd, setConnectionEnd] = useState<{ x: number; y: number } | null>(null);
+  // Selected connection id when a connection path is clicked/focused
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
 
   // Handle zoom
   const handleZoomIn = () => setZoom((z) => Math.min(z + 0.1, 2));
@@ -102,7 +106,7 @@ export default function WorkflowCanvas({
     setDraggingNodeId(nodeId);
     setDragStart({ x: e.clientX - rect.left, y: e.clientY - rect.top });
     setDragNodeStart({ x: node.position.x, y: node.position.y });
-    onNodeSelect(nodeId);
+    handleSelectNode(nodeId);
   };
 
   // Handle port click for connection drawing
@@ -151,6 +155,12 @@ export default function WorkflowCanvas({
     setIsDrawingConnection(true);
     setConnectionStart({ nodeId, portId, portType, x: portX, y: portY });
     setConnectionEnd({ x: portX, y: portY });
+  };
+
+  // When a node is selected, clear any selected connection
+  const handleSelectNode = (nodeId: string | null) => {
+    setSelectedConnectionId(null);
+    onNodeSelect(nodeId);
   };
 
   // Handle mouse move for node dragging and connection drawing
@@ -274,18 +284,44 @@ export default function WorkflowCanvas({
         path = `M ${sourceX} ${sourceY} C ${midX} ${sourceY}, ${midX} ${targetY}, ${targetX} ${targetY}`;
       }
 
+      const isSelected = selectedConnectionId === conn.id;
       return (
         <path
           key={conn.id}
           d={path}
           fill="none"
-          stroke="#6366f1"
-          strokeWidth={2}
+          stroke={isSelected ? '#ef4444' : '#6366f1'}
+          strokeWidth={isSelected ? 3 : 2}
           strokeLinecap="round"
+          style={{ pointerEvents: 'stroke' }}
+          onClick={(ev) => {
+            // Prevent canvas background click handlers
+            ev.stopPropagation();
+            setSelectedConnectionId(conn.id);
+            // Clear node selection when a connection is selected
+            onNodeSelect(null);
+          }}
         />
       );
     });
   };
+
+  // Handle Backspace/Delete keyboard to remove selected node or connection
+  useEffect(() => {
+    const handler = (ev: KeyboardEvent) => {
+      // Use Backspace or Delete
+      if (ev.key === 'Backspace' || ev.key === 'Delete') {
+        if (selectedNodeId) {
+          onNodeDelete(selectedNodeId);
+        } else if (selectedConnectionId && onConnectionDelete) {
+          onConnectionDelete(selectedConnectionId);
+          setSelectedConnectionId(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selectedNodeId, selectedConnectionId, onNodeDelete, onConnectionDelete]);
 
   return (
     <div className="relative flex-1 bg-gray-50 overflow-hidden">
@@ -348,11 +384,13 @@ export default function WorkflowCanvas({
         }}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
-        onClick={(e) => {
-          if (e.target === canvasRef.current) {
-            onNodeSelect(null);
-          }
-        }}
+          onClick={(e) => {
+            if (e.target === canvasRef.current) {
+              // Clear node and connection selection when clicking background
+              setSelectedConnectionId(null);
+              onNodeSelect(null);
+            }
+          }}
         style={{
           backgroundImage: `
             radial-gradient(circle, #d1d5db 1px, transparent 1px)
@@ -394,7 +432,7 @@ export default function WorkflowCanvas({
               node={node}
               isSelected={selectedNodeId === node.id}
               isDragging={draggingNodeId === node.id}
-              onSelect={() => onNodeSelect(node.id)}
+              onSelect={() => handleSelectNode(node.id)}
               onDragStart={(e) => handleNodeDragStart(node.id, e)}
               onConfigure={() => onNodeConfigure(node.id)}
               onPortMouseDown={handlePortMouseDown}
