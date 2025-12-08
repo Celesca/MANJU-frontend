@@ -75,6 +75,15 @@ export default function DemoPage() {
   const recognitionRef = useRef<any>(null);
   const [isRecognizing, setIsRecognizing] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
+  // VAD (voice activity detection) refs/state
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const vadAnalyserRef = useRef<AnalyserNode | null>(null);
+  const vadMediaStreamRef = useRef<MediaStream | null>(null);
+  const vadRafRef = useRef<number | null>(null);
+  const vadSilenceTimerRef = useRef<number | null>(null);
+  const vadSpeakingRef = useRef(false);
+  const VAD_SILENCE_MS = 1100; // silence duration to auto-send
+  const VAD_THRESHOLD = 0.01; // RMS threshold for detecting speech (tweakable)
   
   // Audio playback state
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
@@ -225,6 +234,99 @@ export default function DemoPage() {
     }
   }, [messages, projectId, workflowType]);
 
+  // VAD helpers
+  const startVADMonitoring = useCallback(async (stream?: MediaStream) => {
+    try {
+      const micStream = stream ?? await navigator.mediaDevices.getUserMedia({ audio: true });
+      vadMediaStreamRef.current = micStream;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const audioCtx = new AudioContextClass();
+      audioContextRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(micStream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      source.connect(analyser);
+      vadAnalyserRef.current = analyser;
+      vadSpeakingRef.current = false;
+
+      const sample = () => {
+        const analyserNode = vadAnalyserRef.current;
+        if (!analyserNode) return;
+        const buffer = new Float32Array(analyserNode.fftSize);
+        analyserNode.getFloatTimeDomainData(buffer);
+        let sum = 0;
+        for (let i = 0; i < buffer.length; i++) {
+          sum += buffer[i] * buffer[i];
+        }
+        const rms = Math.sqrt(sum / buffer.length);
+
+        if (rms > VAD_THRESHOLD) {
+          // speaking
+          vadSpeakingRef.current = true;
+          if (vadSilenceTimerRef.current) {
+            window.clearTimeout(vadSilenceTimerRef.current);
+            vadSilenceTimerRef.current = null;
+          }
+        } else {
+          // not loud
+          if (vadSpeakingRef.current) {
+            // start silence timer to finalize
+            if (!vadSilenceTimerRef.current) {
+              vadSilenceTimerRef.current = window.setTimeout(() => {
+                // silence detected after speech -> auto send
+                // append interim transcript then send
+                if (interimTranscript.trim()) {
+                  setInputValue(prev => (prev ? prev + ' ' + interimTranscript : interimTranscript));
+                  setInterimTranscript('');
+                }
+                // only send if there's something to send
+                if (inputRef.current && inputRef.current.value.trim()) {
+                  sendMessage();
+                } else if (inputValue.trim()) {
+                  sendMessage();
+                }
+                vadSpeakingRef.current = false;
+                vadSilenceTimerRef.current = null;
+              }, VAD_SILENCE_MS);
+            }
+          }
+        }
+
+        vadRafRef.current = window.requestAnimationFrame(sample);
+      };
+
+      vadRafRef.current = window.requestAnimationFrame(sample);
+    } catch (err) {
+      console.warn('VAD start failed', err);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputValue, interimTranscript, VAD_SILENCE_MS, VAD_THRESHOLD]);
+
+  const stopVADMonitoring = useCallback(() => {
+    if (vadRafRef.current) {
+      window.cancelAnimationFrame(vadRafRef.current);
+      vadRafRef.current = null;
+    }
+    if (vadSilenceTimerRef.current) {
+      window.clearTimeout(vadSilenceTimerRef.current);
+      vadSilenceTimerRef.current = null;
+    }
+    if (vadAnalyserRef.current) {
+      try { vadAnalyserRef.current.disconnect(); } catch (e) { console.warn(e); }
+      vadAnalyserRef.current = null;
+    }
+    if (audioContextRef.current) {
+      try { audioContextRef.current.close(); } catch (e) { console.warn(e); }
+      audioContextRef.current = null;
+    }
+    if (vadMediaStreamRef.current) {
+      try { vadMediaStreamRef.current.getTracks().forEach(t => t.stop()); } catch (e) { console.warn(e); }
+      vadMediaStreamRef.current = null;
+    }
+    vadSpeakingRef.current = false;
+  }, []);
+
   // Initialize Web Speech API (SpeechRecognition) if available
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -261,10 +363,12 @@ export default function DemoPage() {
       recog.onend = () => {
         // If we were still recognizing, restart to keep continuous recognition
         if (recognitionRef.current && recognitionRef.current._shouldRestart) {
-          try { recognitionRef.current.start(); } catch { /* ignore */ }
+          try { recognitionRef.current.start(); } catch (e) { console.warn(e); }
         } else {
           setIsRecognizing(false);
           setInterimTranscript('');
+          // stop VAD monitoring when recognition naturally ends
+          try { stopVADMonitoring(); } catch (err) { console.warn(err); }
         }
       };
 
@@ -273,7 +377,9 @@ export default function DemoPage() {
       console.warn('SpeechRecognition init failed', err);
       recognitionRef.current = null;
     }
-  }, []);
+  }, [stopVADMonitoring]);
+
+  
 
   const startRecording = useCallback(async () => {
     // If Web Speech API is available, use it for real-time recognition
@@ -282,6 +388,8 @@ export default function DemoPage() {
         recognitionRef.current._shouldRestart = true;
         recognitionRef.current.start();
         setIsRecognizing(true);
+        // start VAD monitoring (separate mic stream) to detect silence
+        try { await startVADMonitoring(); } catch (err) { console.warn('VAD start failed', err); }
         return;
       } catch (err) {
         console.warn('SpeechRecognition start failed', err);
@@ -291,6 +399,8 @@ export default function DemoPage() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
+      // start VAD monitoring based on the same stream (so we can auto-stop on silence)
+      try { await startVADMonitoring(stream); } catch (err) { console.warn('VAD start failed', err); }
       const chunks: Blob[] = [];
       
       recorder.ondataavailable = (e) => {
@@ -316,7 +426,7 @@ export default function DemoPage() {
       setError('Failed to access microphone. Please allow microphone access.');
       console.error('Microphone error:', err);
     }
-  }, [handleVoiceInput]);
+  }, [handleVoiceInput, startVADMonitoring]);
 
   const stopRecording = useCallback(() => {
     // Stop Web Speech API recognition if active
@@ -329,14 +439,16 @@ export default function DemoPage() {
       }
       setIsRecognizing(false);
       setInterimTranscript('');
+      try { stopVADMonitoring(); } catch (err) { console.warn(err); }
       return;
     }
 
     if (mediaRecorder && isRecording) {
       mediaRecorder.stop();
       setIsRecording(false);
+      try { stopVADMonitoring(); } catch (err) { console.warn(err); }
     }
-  }, [mediaRecorder, isRecording, isRecognizing]);
+  }, [mediaRecorder, isRecording, isRecognizing, stopVADMonitoring]);
 
   // Text-to-speech for voice output
   const speakResponse = (text: string) => {
@@ -360,7 +472,7 @@ export default function DemoPage() {
     setPlayingAudioId(null);
   };
 
-  const sendMessage = async () => {
+  const sendMessage = useCallback(async () => {
     if (!inputValue.trim() || sending) return;
 
     const userMessage: Message = {
@@ -426,7 +538,7 @@ export default function DemoPage() {
       setSending(false);
       inputRef.current?.focus();
     }
-  };
+  }, [inputValue, messages, projectId, workflowType, sending]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
