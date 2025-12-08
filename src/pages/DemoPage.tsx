@@ -70,6 +70,11 @@ export default function DemoPage() {
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  // Web Speech API (real-time recognition) state
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null);
+  const [isRecognizing, setIsRecognizing] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState('');
   
   // Audio playback state
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
@@ -149,6 +154,8 @@ export default function DemoPage() {
 
   // Voice recording functions
   const handleVoiceInput = useCallback(async (_audioBlob: Blob) => {
+    // avoid unused param lint
+    void _audioBlob;
     // For demo, we'll use a placeholder transcription
     // In production, this would call a speech-to-text API
     const mockTranscription = "[Voice message received]";
@@ -218,7 +225,69 @@ export default function DemoPage() {
     }
   }, [messages, projectId, workflowType]);
 
+  // Initialize Web Speech API (SpeechRecognition) if available
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    try {
+      const recog = new SpeechRecognition();
+      recog.continuous = true;
+      recog.interimResults = true;
+      // default language (use Thai per example). You can make this configurable later.
+      recog.lang = 'th-TH';
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      recog.onresult = (ev: any) => {
+        let interim = '';
+        let finalTranscript = '';
+        for (let i = ev.resultIndex; i < ev.results.length; ++i) {
+          const res = ev.results[i];
+          if (res.isFinal) {
+            finalTranscript += res[0].transcript;
+          } else {
+            interim += res[0].transcript;
+          }
+        }
+
+        // Append final transcript to the input value and keep interim separately
+        if (finalTranscript) {
+          setInputValue(prev => (prev ? prev + ' ' + finalTranscript : finalTranscript));
+        }
+        setInterimTranscript(interim);
+      };
+
+      recog.onend = () => {
+        // If we were still recognizing, restart to keep continuous recognition
+        if (recognitionRef.current && recognitionRef.current._shouldRestart) {
+          try { recognitionRef.current.start(); } catch { /* ignore */ }
+        } else {
+          setIsRecognizing(false);
+          setInterimTranscript('');
+        }
+      };
+
+      recognitionRef.current = recog;
+    } catch (err) {
+      console.warn('SpeechRecognition init failed', err);
+      recognitionRef.current = null;
+    }
+  }, []);
+
   const startRecording = useCallback(async () => {
+    // If Web Speech API is available, use it for real-time recognition
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current._shouldRestart = true;
+        recognitionRef.current.start();
+        setIsRecognizing(true);
+        return;
+      } catch (err) {
+        console.warn('SpeechRecognition start failed', err);
+      }
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
@@ -250,11 +319,24 @@ export default function DemoPage() {
   }, [handleVoiceInput]);
 
   const stopRecording = useCallback(() => {
+    // Stop Web Speech API recognition if active
+    if (recognitionRef.current && isRecognizing) {
+      try {
+        recognitionRef.current._shouldRestart = false;
+        recognitionRef.current.stop();
+      } catch (err) {
+        console.warn('SpeechRecognition stop failed', err);
+      }
+      setIsRecognizing(false);
+      setInterimTranscript('');
+      return;
+    }
+
     if (mediaRecorder && isRecording) {
       mediaRecorder.stop();
       setIsRecording(false);
     }
-  }, [mediaRecorder, isRecording]);
+  }, [mediaRecorder, isRecording, isRecognizing]);
 
   // Text-to-speech for voice output
   const speakResponse = (text: string) => {
@@ -416,7 +498,7 @@ export default function DemoPage() {
       {validation && !validation.valid && (
         <div className="max-w-4xl mx-auto w-full px-4 pt-4">
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
             <div>
               <p className="font-medium text-amber-800">Workflow has issues</p>
               <ul className="mt-1 text-sm text-amber-700 list-disc list-inside">
@@ -474,7 +556,7 @@ export default function DemoPage() {
                 className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 {message.role === 'assistant' && (
-                  <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center shrink-0">
                     <Bot className="w-5 h-5 text-purple-600" />
                   </div>
                 )}
@@ -536,7 +618,7 @@ export default function DemoPage() {
                 </div>
                 
                 {message.role === 'user' && (
-                  <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0 order-2">
+                  <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center shrink-0 order-2">
                     <User className="w-5 h-5 text-gray-600" />
                   </div>
                 )}
@@ -608,28 +690,43 @@ export default function DemoPage() {
           {/* Voice Input Mode */}
           {workflowType?.input_type === 'voice' ? (
             <div className="flex flex-col items-center gap-4">
-              <motion.button
-                onClick={isRecording ? stopRecording : startRecording}
-                disabled={sending}
-                className={`p-6 rounded-full transition-all ${
-                  isRecording 
-                    ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
-                    : 'bg-purple-600 hover:bg-purple-700'
-                } text-white disabled:opacity-50 disabled:cursor-not-allowed`}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                {sending ? (
-                  <Loader2 className="w-8 h-8 animate-spin" />
-                ) : isRecording ? (
-                  <Square className="w-8 h-8" />
-                ) : (
-                  <Mic className="w-8 h-8" />
-                )}
-              </motion.button>
+              <div className="flex items-center gap-3">
+                <motion.button
+                  onClick={(isRecognizing || isRecording) ? stopRecording : startRecording}
+                  disabled={sending}
+                  className={`p-6 rounded-full transition-all ${
+                    (isRecognizing || isRecording)
+                      ? 'bg-red-500 hover:bg-red-600 animate-pulse'
+                      : 'bg-purple-600 hover:bg-purple-700'
+                  } text-white disabled:opacity-50 disabled:cursor-not-allowed`}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  {sending ? (
+                    <Loader2 className="w-8 h-8 animate-spin" />
+                  ) : (isRecognizing || isRecording) ? (
+                    <Square className="w-8 h-8" />
+                  ) : (
+                    <Mic className="w-8 h-8" />
+                  )}
+                </motion.button>
+
+                <button
+                  onClick={() => { setInputValue(''); setInterimTranscript(''); }}
+                  className="px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200 text-sm"
+                >
+                  Clear
+                </button>
+              </div>
+
               <p className="text-sm text-gray-500">
-                {isRecording ? 'Recording... Click to stop' : 'Click to start recording'}
+                {(isRecognizing || isRecording) ? 'Recording... Click to stop' : 'Click to start recording'}
               </p>
+
+              {/* Interim transcript (live) */}
+              {interimTranscript && (
+                <div className="text-sm text-gray-500 italic">{interimTranscript}</div>
+              )}
               
               {/* Also allow text input as fallback */}
               <div className="w-full flex items-center gap-3 mt-2">
