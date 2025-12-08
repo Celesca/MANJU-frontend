@@ -7,7 +7,7 @@ export interface WorkflowNodeProps {
   node: WorkflowNode;
   isSelected: boolean;
   isDragging?: boolean;
-  onSelect: () => void;
+  onSelect: (e?: React.MouseEvent) => void;
   onDragStart: (e: React.MouseEvent) => void;
   onConfigure: () => void;
   onPortMouseDown?: (
@@ -91,7 +91,7 @@ export default function WorkflowNodeComponent({
       onMouseLeave={() => setIsHovered(false)}
       onClick={(e) => {
         e.stopPropagation();
-        onSelect();
+        onSelect(e);
       }}
     >
       {/* Header */}
