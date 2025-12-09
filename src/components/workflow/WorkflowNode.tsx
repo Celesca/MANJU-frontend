@@ -211,7 +211,7 @@ function NodePreview({ node }: { node: WorkflowNode }) {
       return (
         <div className="text-xs text-gray-600">
           <div className="truncate">Sheet: {data.sheetName || 'Not configured'}</div>
-          <div>Mode: {data.syncMode}</div>
+          {data.spreadsheetId && <div className="truncate text-green-600">Connected</div>}
         </div>
       );
     }

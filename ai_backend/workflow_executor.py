@@ -2,6 +2,7 @@
 Workflow Executor using LangGraph
 Converts frontend workflow JSON to executable LangGraph and runs it.
 Includes FAISS + OpenAI Embeddings for RAG functionality.
+Includes Google Sheets integration via gspread.
 """
 
 import os
@@ -30,6 +31,16 @@ try:
 except ImportError as e:
     FAISS_AVAILABLE = False
     logging.warning(f"FAISS/LangChain imports failed: {e}")
+
+# Google Sheets imports
+try:
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+    import pandas as pd
+    GSPREAD_AVAILABLE = True
+except ImportError as e:
+    GSPREAD_AVAILABLE = False
+    logging.warning(f"gspread imports failed: {e}")
 
 logger = logging.getLogger(__name__)
 
@@ -602,14 +613,95 @@ class NodeProcessors:
         return state
     
     def process_google_sheets(self, state: WorkflowState, node_data: Dict) -> WorkflowState:
-        """Process google-sheets node - fetches data from sheets."""
+        """Process google-sheets node - fetches data from sheets using gspread."""
         state["nodes_executed"].append("google-sheets")
         
         spreadsheet_id = node_data.get("spreadsheetId", "")
         sheet_name = node_data.get("sheetName", "Sheet1")
         
-        # For demo, return mock data
-        state["sheets_data"] = f"[Demo] Data from {sheet_name}: Sample row 1, Sample row 2"
+        if not GSPREAD_AVAILABLE:
+            logger.warning("gspread not available, returning mock data")
+            state["sheets_data"] = f"[Google Sheets not available] Could not fetch data from {sheet_name}"
+            return state
+        
+        if not spreadsheet_id:
+            logger.warning("No spreadsheet ID provided")
+            state["sheets_data"] = "[Error] No spreadsheet ID configured"
+            return state
+        
+        try:
+            # Define the scope for Google Sheets API
+            scope = [
+                'https://spreadsheets.google.com/feeds',
+                'https://www.googleapis.com/auth/drive'
+            ]
+            
+            # Look for credentials file in the ai_backend directory
+            credentials_file = os.path.join(os.path.dirname(__file__), 'client_secret.json')
+            
+            if not os.path.exists(credentials_file):
+                logger.warning(f"Credentials file not found at {credentials_file}")
+                state["sheets_data"] = "[Error] Google Sheets credentials not configured"
+                return state
+            
+            # Authorize and create client
+            credentials = ServiceAccountCredentials.from_json_keyfile_name(credentials_file, scope)
+            client = gspread.authorize(credentials)
+            
+            # Open spreadsheet by ID
+            try:
+                spreadsheet = client.open_by_key(spreadsheet_id)
+            except gspread.SpreadsheetNotFound:
+                logger.warning(f"Spreadsheet not found: {spreadsheet_id}")
+                state["sheets_data"] = f"[Error] Spreadsheet not found. Make sure it's shared with the service account."
+                return state
+            
+            # Get the specific worksheet
+            try:
+                worksheet = spreadsheet.worksheet(sheet_name)
+            except gspread.WorksheetNotFound:
+                logger.warning(f"Worksheet not found: {sheet_name}")
+                # Try to get the first sheet as fallback
+                worksheet = spreadsheet.sheet1
+                logger.info(f"Using first sheet: {worksheet.title}")
+            
+            # Get all records as a list of dictionaries
+            records = worksheet.get_all_records()
+            
+            if not records:
+                # Try getting all values if no headers
+                all_values = worksheet.get_all_values()
+                if all_values:
+                    # Convert to markdown table format
+                    headers = all_values[0] if all_values else []
+                    rows = all_values[1:] if len(all_values) > 1 else []
+                    
+                    if headers and rows:
+                        # Create markdown table
+                        df = pd.DataFrame(rows, columns=headers)
+                        sheets_context = f"Data from Google Sheet '{sheet_name}':\n\n{df.to_markdown(index=False)}"
+                    else:
+                        sheets_context = f"Google Sheet '{sheet_name}' appears to be empty."
+                else:
+                    sheets_context = f"Google Sheet '{sheet_name}' is empty."
+            else:
+                # Convert records to DataFrame and then to markdown
+                df = pd.DataFrame(records)
+                
+                # Limit to first 50 rows for context (to avoid token limits)
+                if len(df) > 50:
+                    df_preview = df.head(50)
+                    sheets_context = f"Data from Google Sheet '{sheet_name}' (showing first 50 of {len(df)} rows):\n\n{df_preview.to_markdown(index=False)}"
+                else:
+                    sheets_context = f"Data from Google Sheet '{sheet_name}' ({len(df)} rows):\n\n{df.to_markdown(index=False)}"
+            
+            logger.info(f"Successfully fetched data from sheet '{sheet_name}': {len(records)} records")
+            state["sheets_data"] = sheets_context
+            
+        except Exception as e:
+            logger.error(f"Error fetching Google Sheets data: {str(e)}")
+            state["sheets_data"] = f"[Error] Failed to fetch data from Google Sheets: {str(e)}"
+        
         return state
     
     def process_if_condition(self, state: WorkflowState, node_data: Dict) -> WorkflowState:
@@ -717,6 +809,7 @@ class WorkflowExecutor:
         # Identify node types
         if_condition_nodes = {nid for nid, node in nodes.items() if node.type == "if-condition"}
         rag_nodes = {nid for nid, node in nodes.items() if node.type == "rag-documents"}
+        sheets_nodes = {nid for nid, node in nodes.items() if node.type == "google-sheets"}
         ai_model_nodes = {nid for nid, node in nodes.items() if node.type == "ai-model"}
         input_nodes = {nid for nid, node in nodes.items() if node.type in ("text-input", "voice-input")}
         
@@ -729,7 +822,17 @@ class WorkflowExecutor:
                     rag_to_ai[rag_id] = target_id
                     ai_from_rag[target_id] = rag_id
         
+        # Find which Google Sheets nodes connect to which AI models (via context port)
+        sheets_to_ai: Dict[str, str] = {}  # sheets_id -> ai_id
+        ai_from_sheets: Dict[str, str] = {}  # ai_id -> sheets_id
+        for sheets_id in sheets_nodes:
+            for target_id, source_port, target_port in adjacency.get(sheets_id, []):
+                if target_id in ai_model_nodes:
+                    sheets_to_ai[sheets_id] = target_id
+                    ai_from_sheets[target_id] = sheets_id
+        
         logger.info(f"RAG to AI mappings: {rag_to_ai}")
+        logger.info(f"Sheets to AI mappings: {sheets_to_ai}")
         
         # Add all nodes to graph
         for node_id, node in nodes.items():
@@ -785,7 +888,7 @@ class WorkflowExecutor:
                         added_edges.add((source_id, t))
                         
             elif source_id in input_nodes:
-                # Input node: check if any target AI model has a RAG feeding into it
+                # Input node: check if any target AI model has a RAG or Sheets feeding into it
                 for target_id, _, target_port in targets:
                     if target_id in ai_model_nodes and target_id in ai_from_rag:
                         # This AI model has RAG - route input → RAG instead of input → AI
@@ -794,8 +897,20 @@ class WorkflowExecutor:
                             graph.add_edge(source_id, rag_id)
                             added_edges.add((source_id, rag_id))
                             logger.info(f"Redirected input→AI to input→RAG: {source_id} → {rag_id}")
+                    elif target_id in ai_model_nodes and target_id in ai_from_sheets:
+                        # This AI model has Sheets - route input → Sheets instead of input → AI
+                        sheets_id = ai_from_sheets[target_id]
+                        if (source_id, sheets_id) not in added_edges:
+                            graph.add_edge(source_id, sheets_id)
+                            added_edges.add((source_id, sheets_id))
+                            logger.info(f"Redirected input→AI to input→Sheets: {source_id} → {sheets_id}")
                     elif target_id in rag_nodes:
                         # Direct input → RAG connection
+                        if (source_id, target_id) not in added_edges:
+                            graph.add_edge(source_id, target_id)
+                            added_edges.add((source_id, target_id))
+                    elif target_id in sheets_nodes:
+                        # Direct input → Sheets connection
                         if (source_id, target_id) not in added_edges:
                             graph.add_edge(source_id, target_id)
                             added_edges.add((source_id, target_id))
@@ -812,6 +927,13 @@ class WorkflowExecutor:
                         graph.add_edge(source_id, target_id)
                         added_edges.add((source_id, target_id))
                         logger.info(f"Added RAG→target edge: {source_id} → {target_id}")
+            elif source_id in sheets_nodes:
+                # Sheets node: connect to its AI model target
+                for target_id, _, _ in targets:
+                    if (source_id, target_id) not in added_edges:
+                        graph.add_edge(source_id, target_id)
+                        added_edges.add((source_id, target_id))
+                        logger.info(f"Added Sheets→target edge: {source_id} → {target_id}")
             else:
                 # Other nodes: add edges normally
                 for target_id, _, _ in targets:
@@ -827,9 +949,10 @@ class WorkflowExecutor:
         
         entry_candidates = [nid for nid, count in original_incoming_count.items() if count == 0]
         
-        # Prefer input nodes as entry, then RAG if no input
+        # Prefer input nodes as entry, then RAG/Sheets if no input
         input_entries = [nid for nid in entry_candidates if nid in input_nodes]
         rag_entries = [nid for nid in entry_candidates if nid in rag_nodes]
+        sheets_entries = [nid for nid in entry_candidates if nid in sheets_nodes]
         
         if input_entries:
             graph.set_entry_point(input_entries[0])
@@ -837,6 +960,9 @@ class WorkflowExecutor:
         elif rag_entries:
             graph.set_entry_point(rag_entries[0])
             logger.info(f"Entry point: {rag_entries[0]} (RAG node)")
+        elif sheets_entries:
+            graph.set_entry_point(sheets_entries[0])
+            logger.info(f"Entry point: {sheets_entries[0]} (Sheets node)")
         elif entry_candidates:
             graph.set_entry_point(entry_candidates[0])
             logger.info(f"Entry point: {entry_candidates[0]}")
