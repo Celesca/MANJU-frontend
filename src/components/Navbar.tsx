@@ -1,38 +1,45 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, X, ChevronRight, LogOut, User, ChevronDown } from "lucide-react";
+import { Menu, X, ChevronRight, LogOut, User as UserIcon, ChevronDown } from "lucide-react";
+
+// 1. สร้าง Interface เพื่อบอก TypeScript ว่าหน้าตาของ User Object เป็นอย่างไร
+interface UserData {
+  id: string;
+  name: string;
+  email: string;
+  picture: string;
+  preference_language?: string;
+  regist_source?: string;
+}
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   
-  // State สำหรับเก็บข้อมูล User และการเปิด/ปิด Dropdown โปรไฟล์
-  const [user, setUser] = useState(null);
+  // 2. กำหนด Generic Type <UserData | null> ให้กับ useState
+  const [user, setUser] = useState<UserData | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
-  // Hook สำหรับเช็ค URL ปัจจุบัน
   const location = useLocation();
 
-  // --- 1. Configuration: หน้าที่มีพื้นหลังสีขาว (Navbar ต้องตัวหนังสือเข้ม) ---
   const whiteBgPages = ["/projects", "/profile", "/login", "/register", "/settings", "/dashboard"];
   const isWhitePage = whiteBgPages.some(path => location.pathname.startsWith(path));
 
-  // --- 2. Helper: อ่านค่า Cookie ---
-  const getCookie = (name) => {
+  // 3. ระบุ type ของ parameter name เป็น string
+  const getCookie = (name: string) => {
     const value = `; ${document.cookie}`;
     const parts = value.split(`; ${name}=`);
-    if (parts.length === 2) return parts.pop().split(';').shift();
+    // 4. ใช้ Optional Chaining (?.) ตรง pop() เพื่อแก้ error Object is possibly 'undefined'
+    if (parts.length === 2) return parts.pop()?.split(';').shift();
     return null;
   };
 
-  // --- 3. Effect: ตรวจสอบ Cookie 'manju_user' ---
   useEffect(() => {
     const checkUserLogin = () => {
       const userCookie = getCookie("manju_user");
       if (userCookie) {
         try {
-          // decodeURIComponent จำเป็นมากเพราะ cookie มักจะถูก encode มา
           const userData = JSON.parse(decodeURIComponent(userCookie));
           setUser(userData);
         } catch (error) {
@@ -44,7 +51,6 @@ const Navbar = () => {
     checkUserLogin();
   }, []);
 
-  // --- 4. Effect: Handle scroll ---
   useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 20);
@@ -53,26 +59,21 @@ const Navbar = () => {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // --- 5. Function: Logout ---
   const handleLogout = async () => {
     try {
       const res = await fetch("http://localhost:8080/auth/logout", {
         method: "GET",
-        credentials: "include", // สำคัญ: ต้องส่งไปเพื่อบอก Server ว่าเราคือใคร
+        credentials: "include",
       });
 
       if (res.ok) {
-        // ถ้า Server ตอบกลับมาว่าลบแล้ว ค่อยเคลียร์ฝั่งเรา
         setUser(null);
         setIsProfileOpen(false);
-        // ลบ Cookie ฝั่ง Client ซ้ำอีกที (เผื่อตัวไหนไม่ใช่ HttpOnly)
         document.cookie.split(";").forEach((c) => {
           document.cookie = c
             .replace(/^ +/, "")
             .replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
         });
-        
-        // Reload หรือ Redirect ไปหน้า Login
         window.location.href = "/login"; 
       }
     } catch (error) {
@@ -80,13 +81,12 @@ const Navbar = () => {
     }
   };
 
-  // --- 6. Function: แก้ปัญหารูปไม่ขึ้น (Fallback Image) ---
-  const handleImageError = (e) => {
-    e.target.onerror = null; 
-    e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || 'User')}&background=random&color=fff`;
+  // 5. ระบุ Type ของ Event e ให้ถูกต้อง (React.SyntheticEvent<HTMLImageElement>)
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
+    e.currentTarget.onerror = null; 
+    e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || 'User')}&background=random&color=fff`;
   };
 
-  // --- 7. Theme Logic: กำหนดสีตามสถานะ Scrolled หรือ WhitePage ---
   const isDarkTheme = scrolled || isWhitePage;
 
   const textColor = isDarkTheme ? 'text-slate-800' : 'text-white';
@@ -116,7 +116,6 @@ const Navbar = () => {
         }`}
       >
         <nav className="max-w-7xl mx-auto flex items-center justify-between px-6">
-          {/* --- Logo --- */}
           <Link to="/" className="flex items-center gap-2 cursor-pointer group">
             <img
               src="https://www.vhv.rs/dpng/d/516-5169511_voice-ai-png-transparent-png.png"
@@ -128,7 +127,6 @@ const Navbar = () => {
             </span>
           </Link>
 
-          {/* --- Desktop Menu --- */}
           <ul className="hidden md:flex items-center gap-8">
             {navLinks.map((link) => (
               <li key={link.name}>
@@ -143,10 +141,8 @@ const Navbar = () => {
             ))}
           </ul>
 
-          {/* --- Right Actions (Desktop) --- */}
           <div className="hidden md:flex items-center gap-4 relative">
             {user ? (
-              // === Logged In View ===
               <div className="relative">
                 <button
                   onClick={() => setIsProfileOpen(!isProfileOpen)}
@@ -164,7 +160,6 @@ const Navbar = () => {
                   <ChevronDown size={14} className={textColor} />
                 </button>
 
-                {/* Profile Dropdown */}
                 <AnimatePresence>
                   {isProfileOpen && (
                     <motion.div
@@ -179,7 +174,7 @@ const Navbar = () => {
                       </div>
                       
                       <Link to="/profile" className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-purple-50 hover:text-purple-700 transition-colors">
-                        <User size={16} />
+                        <UserIcon size={16} />
                         Profile
                       </Link>
                       
@@ -197,7 +192,6 @@ const Navbar = () => {
                 </AnimatePresence>
               </div>
             ) : (
-              // === Guest View ===
               <>
                 <Link
                   to="/login"
@@ -217,7 +211,6 @@ const Navbar = () => {
             )}
           </div>
 
-          {/* --- Mobile Menu Toggle --- */}
           <div className="md:hidden flex items-center gap-4">
             <button
               onClick={() => setIsOpen(!isOpen)}
@@ -229,7 +222,6 @@ const Navbar = () => {
         </nav>
       </header>
 
-      {/* --- Mobile Dropdown --- */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -239,7 +231,6 @@ const Navbar = () => {
             className="fixed top-[60px] left-0 w-full bg-white/95 backdrop-blur-xl border-b border-slate-200 shadow-xl z-40 md:hidden overflow-hidden"
           >
             <div className="flex flex-col p-6 space-y-4">
-              {/* Mobile User Profile Section */}
               {user && (
                 <div className="flex items-center gap-3 pb-4 border-b border-slate-200">
                    <img 
