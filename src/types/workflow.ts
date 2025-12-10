@@ -55,10 +55,6 @@ export interface UploadedDocument {
 export interface GoogleSheetsData {
   spreadsheetId: string;
   sheetName: string;
-  range: string;
-  credentials: boolean;
-  syncMode: 'read' | 'write' | 'both';
-  lastSynced?: string;
 }
 
 export interface VoiceInputData {

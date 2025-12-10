@@ -67,18 +67,15 @@ export const nodeTemplates: NodeTemplate[] = [
   {
     type: 'google-sheets',
     label: 'Google Sheets',
-    description: 'Read/write spreadsheet data',
+    description: 'Read spreadsheet data for context',
     icon: 'table',
     category: 'data',
     defaultData: {
       spreadsheetId: '',
       sheetName: '',
-      range: 'A1:Z100',
-      credentials: false,
-      syncMode: 'read',
     },
-    defaultInputs: [{ id: 'data-in', type: 'input', position: 'left', label: 'Input' }],
-    defaultOutputs: [{ id: 'data-out', type: 'output', position: 'right', label: 'Output' }],
+    defaultInputs: [],
+    defaultOutputs: [{ id: 'context-out', type: 'output', position: 'right', label: 'Context' }],
   },
   {
     type: 'voice-output',
