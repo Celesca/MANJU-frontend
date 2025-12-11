@@ -73,7 +73,7 @@ const UserCardSwap = () => {
   }, [activeIndex, isPaused]);
 
   // คำนวณ Index เพื่อการแสดงผลแบบ Loop
-  const getDisplayIndex = (index) => {
+  const getDisplayIndex = (index: number) => {
     // หาความต่างของ index กับ activeIndex เพื่อกำหนดตำแหน่ง
     const diff = (index - activeIndex + users.length) % users.length;
     return diff;

@@ -1,11 +1,29 @@
-import { Volume2, Zap, Music, Mic, RotateCcw, Languages } from "lucide-react";
+import { Volume2, Zap, Music, RotateCcw, Languages } from "lucide-react";
 
-export default function VoiceControls({ mode, settings, onSettingsChange }) {
+// 1. สร้าง Interface สำหรับโครงสร้างของ Settings
+interface VoiceSettings {
+  speed: number;
+  pitch: number;
+  volume: number;
+  language: string;
+}
+
+// 2. สร้าง Interface สำหรับ Props ที่รับเข้ามา
+interface VoiceControlsProps {
+  mode: string; // หรือใช้ 'text-to-voice' | 'voice-to-text' เพื่อความแม่นยำกว่า
+  settings: VoiceSettings;
+  // Type นี้รองรับทั้งการส่งค่าตรงๆ และการส่งฟังก์ชัน (prev) => ... แบบ useState
+  onSettingsChange: (value: VoiceSettings | ((prev: VoiceSettings) => VoiceSettings)) => void; 
+}
+
+export default function VoiceControls({ mode, settings, onSettingsChange }: VoiceControlsProps) {
   
-  // ฟังก์ชันช่วยอัปเดตค่า Setting ทีละตัว
-  const handleChange = (key, value) => {
+  // 3. ระบุ Type ให้ key และ value
+  // keyof VoiceSettings จะบังคับว่า key ต้องเป็นชื่อ field ที่มีใน interface เท่านั้น (speed, pitch, etc.)
+  const handleChange = (key: keyof VoiceSettings, value: number | string) => {
     // ป้องกัน error กรณีไม่ได้ส่ง prop มา (Fallback)
     if (onSettingsChange) {
+      // TypeScript จะรู้เองว่า prev คือ VoiceSettings จากการกำหนด Type ด้านบน
       onSettingsChange((prev) => ({ ...prev, [key]: value }));
     }
   };

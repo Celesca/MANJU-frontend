@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, X, ChevronRight, LogOut, User as UserIcon, ChevronDown } from "lucide-react";
+import { Menu, X, ChevronRight, LogOut, User as  ChevronDown } from "lucide-react";
 
 interface UserData {
   id: string;

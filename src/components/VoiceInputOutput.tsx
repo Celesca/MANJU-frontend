@@ -1,23 +1,52 @@
 import { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, Volume2, Copy, Trash2, StopCircle, Play, User } from "lucide-react";
 
-export default function VoiceInputOutput({ mode, settings }) {
-  const [text, setText] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  
-  // เก็บรายการเสียงที่ผ่านการแปลงชื่อแล้ว
-  const [thaiVoices, setThaiVoices] = useState([]); 
-  const [selectedVoiceURI, setSelectedVoiceURI] = useState(""); // ใช้ URI เป็น Key เพราะแม่นยำกว่า Name
-  
-  const recognitionRef = useRef(null);
-  const synthRef = useRef(window.speechSynthesis);
+// 1. สร้าง Interface สำหรับ Type ต่างๆ
+interface VoiceSettings {
+  speed: number;
+  pitch: number;
+  volume: number;
+}
 
-  // 🛠️ ฟังก์ชันแปลงชื่อเสียงให้เป็น "ผู้ชาย/ผู้หญิง" แบบอัตโนมัติ
-  const getFriendlyName = (voice, index) => {
+interface VoiceInputOutputProps {
+  mode: string;
+  settings: VoiceSettings;
+}
+
+interface FormattedVoice {
+  original: SpeechSynthesisVoice;
+  label: string;
+  uri: string;
+}
+
+// 2. ประกาศ Interface สำหรับ SpeechRecognition (เพราะ TypeScript มาตรฐานไม่มี)
+interface ISpeechRecognition extends EventTarget {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  start: () => void;
+  stop: () => void;
+  onresult: (event: any) => void;
+  onend: () => void;
+}
+
+export default function VoiceInputOutput({ mode, settings }: VoiceInputOutputProps) {
+  const [text, setText] = useState<string>("");
+  const [isRecording, setIsRecording] = useState<boolean>(false);
+  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+  
+  // 3. ระบุ Generic Type ให้ useState เพื่อแก้ปัญหา 'never[]'
+  const [thaiVoices, setThaiVoices] = useState<FormattedVoice[]>([]); 
+  const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>("");
+  
+  // ใช้ Type ที่เราประกาศไว้ด้านบน หรือ any เพื่อความง่ายในการจัดการ Webkit
+  const recognitionRef = useRef<ISpeechRecognition | null>(null);
+  const synthRef = useRef<SpeechSynthesis>(window.speechSynthesis);
+
+  // 4. ระบุ Type ให้ Parameter (voice, index)
+  const getFriendlyName = (voice: SpeechSynthesisVoice, index: number) => {
     const name = voice.name.toLowerCase();
     
-    // รายชื่อ Key ที่บ่งบอกเพศ (Windows / Mac / Android)
     if (name.includes("niwat") || name.includes("pattara") || name.includes("sarawut")) {
       return `เสียงผู้ชาย (ชุดที่ ${index + 1})`;
     }
@@ -27,20 +56,16 @@ export default function VoiceInputOutput({ mode, settings }) {
     if (name.includes("google") || name.includes("android")) {
       return `เสียง AI Google (มาตรฐาน)`;
     }
-    // กรณีไม่รู้จักชื่อ
     return `เสียงไทยชุดที่ ${index + 1}`;
   };
 
-  // ✅ 1. โหลดและกรองเฉพาะเสียงไทย + เปลี่ยนชื่อ
   useEffect(() => {
     const loadVoices = () => {
       const allVoices = synthRef.current.getVoices();
       
-      // 🇹🇭 กรองเอาแค่ภาษาไทย (th-TH หรือ th)
       const thVoicesRaw = allVoices.filter(v => v.lang.includes("th"));
 
-      // สร้าง Object ใหม่ที่มีชื่อเล่นที่เข้าใจง่าย
-      const cleanVoices = thVoicesRaw.map((v, i) => ({
+      const cleanVoices: FormattedVoice[] = thVoicesRaw.map((v, i) => ({
         original: v,
         label: getFriendlyName(v, i),
         uri: v.voiceURI
@@ -48,7 +73,6 @@ export default function VoiceInputOutput({ mode, settings }) {
 
       setThaiVoices(cleanVoices);
       
-      // ตั้งค่าเริ่มต้น (เลือกเสียงแรกที่เจอ)
       if (cleanVoices.length > 0) {
         setSelectedVoiceURI(cleanVoices[0].uri);
       }
@@ -60,15 +84,18 @@ export default function VoiceInputOutput({ mode, settings }) {
     }
   }, []);
 
-  // ✅ 2. ตั้งค่า Voice to Text (รับภาษาไทยเท่านั้น)
   useEffect(() => {
+    // 5. แก้ Error 'window.webkitSpeechRecognition' ด้วยการ Cast เป็น any
     if (typeof window !== "undefined" && "webkitSpeechRecognition" in window) {
-      const recognition = new window.webkitSpeechRecognition();
-      recognition.lang = "th-TH"; // บังคับภาษาไทย
+      const SpeechRecognition = (window as any).webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
+      
+      recognition.lang = "th-TH";
       recognition.continuous = true;
       recognition.interimResults = true;
 
-      recognition.onresult = (event) => {
+      // ระบุ Type ให้ event หรือใช้ any ก็ได้สำหรับส่วนนี้
+      recognition.onresult = (event: any) => {
         let transcript = "";
         for (let i = event.resultIndex; i < event.results.length; i++) {
           transcript += event.results[i][0].transcript;
@@ -109,13 +136,11 @@ export default function VoiceInputOutput({ mode, settings }) {
 
     const utterance = new SpeechSynthesisUtterance(text);
     
-    // หาเสียงจาก URI ที่เลือกไว้
     const selectedVoiceObj = thaiVoices.find(v => v.uri === selectedVoiceURI);
     if (selectedVoiceObj) {
       utterance.voice = selectedVoiceObj.original;
     }
     
-    // รับค่า settings จากภายนอก
     utterance.rate = settings?.speed || 1;
     utterance.pitch = settings?.pitch || 1;
     utterance.volume = settings?.volume || 1;

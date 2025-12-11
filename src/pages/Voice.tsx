@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Mic, Type, Settings2, Sparkles, LayoutDashboard } from 'lucide-react';
+import { Mic, Type, Settings2, Sparkles} from 'lucide-react';
 import VoiceInputOutput from '../components/VoiceInputOutput'; // ตรวจสอบ path ให้ถูกต้อง
 import VoiceControls from '../components/VoiceControls';     // ตรวจสอบ path ให้ถูกต้อง
 
