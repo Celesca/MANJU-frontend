@@ -3,7 +3,6 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X, ChevronRight, LogOut, User as UserIcon, ChevronDown } from "lucide-react";
 
-// 1. สร้าง Interface เพื่อบอก TypeScript ว่าหน้าตาของ User Object เป็นอย่างไร
 interface UserData {
   id: string;
   name: string;
@@ -17,20 +16,17 @@ const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   
-  // 2. กำหนด Generic Type <UserData | null> ให้กับ useState
   const [user, setUser] = useState<UserData | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   const location = useLocation();
 
-  const whiteBgPages = ["/projects", "/profile", "/login", "/register", "/settings", "/dashboard"];
+  const whiteBgPages = ["/projects", "/profile", "/login", "/demo", "/settings", "/dashboard"];
   const isWhitePage = whiteBgPages.some(path => location.pathname.startsWith(path));
 
-  // 3. ระบุ type ของ parameter name เป็น string
   const getCookie = (name: string) => {
     const value = `; ${document.cookie}`;
     const parts = value.split(`; ${name}=`);
-    // 4. ใช้ Optional Chaining (?.) ตรง pop() เพื่อแก้ error Object is possibly 'undefined'
     if (parts.length === 2) return parts.pop()?.split(';').shift();
     return null;
   };
@@ -81,7 +77,6 @@ const Navbar = () => {
     }
   };
 
-  // 5. ระบุ Type ของ Event e ให้ถูกต้อง (React.SyntheticEvent<HTMLImageElement>)
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
     e.currentTarget.onerror = null; 
     e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || 'User')}&background=random&color=fff`;
@@ -98,8 +93,8 @@ const Navbar = () => {
   const hoverBgUser = isDarkTheme ? 'hover:bg-slate-100' : 'hover:bg-white/10';
 
   const navLinks = [
-    { name: "Overview", href: "/voice" },
-    { name: "My Projects", href: "/projects" },
+    { name: "Home", href: "/" },
+    { name: "Projects", href: "/projects" },
     { name: "Features", href: "#" },
     { name: "About", href: "#" },
     { name: "Pricing", href: "#" },
@@ -173,10 +168,10 @@ const Navbar = () => {
                         <p className="text-xs text-slate-500 truncate">{user.email}</p>
                       </div>
                       
-                      <Link to="/profile" className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-purple-50 hover:text-purple-700 transition-colors">
+                      {/* <Link to="/profile" className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-purple-50 hover:text-purple-700 transition-colors">
                         <UserIcon size={16} />
                         Profile
-                      </Link>
+                      </Link> */}
                       
                       <div className="border-t border-slate-100 my-1"></div>
                       
@@ -199,6 +194,9 @@ const Navbar = () => {
                 >
                   Log in
                 </Link>
+                <Link
+                  to="/login"
+                >
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
@@ -207,6 +205,7 @@ const Navbar = () => {
                   Get Started
                   <ChevronRight size={16} />
                 </motion.button>
+                </Link>
               </>
             )}
           </div>

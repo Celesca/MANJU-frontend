@@ -1,83 +1,175 @@
-const VoiceControls = ({ mode }: { mode: string }) => {
-    
-    // ซ่อน controls หากไม่ใช่โหมด Text-to-Voice
-    if (mode !== 'text-to-voice') {
-        return (
-            <div className="p-4 bg-gray-100 rounded-xl text-center">
-                <p className="text-gray-500 italic">
-                    การปรับแต่งโทนเสียงและผู้พูดมีผลเฉพาะในโหมด 
-                    <span className="font-semibold text-purple-600"> "Text to Voice" </span> เท่านั้น
-                </p>
-            </div>
-        );
+import { Volume2, Zap, Music, Mic, RotateCcw, Languages } from "lucide-react";
+
+export default function VoiceControls({ mode, settings, onSettingsChange }) {
+  
+  // ฟังก์ชันช่วยอัปเดตค่า Setting ทีละตัว
+  const handleChange = (key, value) => {
+    // ป้องกัน error กรณีไม่ได้ส่ง prop มา (Fallback)
+    if (onSettingsChange) {
+      onSettingsChange((prev) => ({ ...prev, [key]: value }));
     }
+  };
 
-    return (
-        <div className="space-y-6">
-            <h3 className="text-2xl font-bold text-gray-900 border-b pb-3 mb-4">🎙️ การตั้งค่าเสียง</h3>
+  // ฟังก์ชัน Reset ค่าเป็น Default
+  const handleReset = () => {
+    if (onSettingsChange) {
+      onSettingsChange({
+        speed: 1,
+        pitch: 1,
+        volume: 1,
+        language: 'th-TH'
+      });
+    }
+  };
 
-            {/* A. Voice Selection */}
-            <div className="control-group">
-                <label className="block text-sm font-medium text-gray-700 mb-2">1. เลือกผู้พูด (Voice Actor)</label>
-                <select className="w-full p-2 border border-gray-300 rounded-lg focus:ring-purple-500 focus:border-purple-500 transition-shadow">
-                    <option value="thai-male-formal">Thai - ชาย (เป็นทางการ)</option>
-                    <option value="thai-female-casual">Thai - หญิง (เป็นกันเอง)</option>
-                    <option value="eng-adult-a1">English - Adult A1</option>
-                    <option value="jpn-child-b3">Japanese - Child B3</option>
-                </select>
+  return (
+    <div className="space-y-8">
+      
+      {/* -----------------------------
+          MODE: Text to Voice (TTS)
+      ----------------------------- */}
+      {mode === "text-to-voice" ? (
+        <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
+          
+          {/* Speed Control */}
+          <div className="space-y-3">
+            <div className="flex justify-between items-center text-sm font-medium text-slate-700">
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4 text-violet-500" />
+                <span>ความเร็ว (Speed)</span>
+              </div>
+              <span className="bg-violet-100 text-violet-700 px-2 py-0.5 rounded-md text-xs">
+                {settings?.speed || 1}x
+              </span>
             </div>
-
-            {/* B. Tone/Emotion Adjustment (ปรับโทนเสียง) */}
-            <div className="control-group">
-                <label className="block text-sm font-medium text-gray-700 mb-2">2. ปรับโทนเสียง/อารมณ์</label>
-                <input 
-                    type="range" 
-                    min="0" max="100" defaultValue="50" 
-                    className="w-full h-3 bg-purple-100 rounded-lg appearance-none cursor-pointer accent-purple-600" 
-                />
-                <div className="flex justify-between text-xs text-gray-500 mt-1">
-                    <span>เศร้า/เคร่งเครียด</span>
-                    <span>เป็นกลาง</span>
-                    <span>สนุก/ตื่นเต้น</span>
-                </div>
+            <input
+              type="range"
+              min="0.5"
+              max="2"
+              step="0.1"
+              value={settings?.speed || 1}
+              onChange={(e) => handleChange("speed", parseFloat(e.target.value))}
+              className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-violet-600 hover:accent-violet-500 transition-all"
+            />
+            <div className="flex justify-between text-xs text-slate-400 px-1">
+              <span>0.5x (ช้า)</span>
+              <span>2.0x (เร็ว)</span>
             </div>
+          </div>
 
-            {/* C. Speed Control */}
-            <div className="control-group">
-                <label className="block text-sm font-medium text-gray-700 mb-2">3. ความเร็ว (Speed)</label>
-                <input 
-                    type="range" 
-                    min="0.5" max="2" step="0.1" defaultValue="1" 
-                    className="w-full h-3 bg-green-100 rounded-lg appearance-none cursor-pointer accent-green-600" 
-                />
-                <div className="flex justify-between text-xs text-gray-500 mt-1">
-                    <span>ช้า (0.5x)</span>
-                    <span>ปกติ (1.0x)</span>
-                    <span>เร็ว (2.0x)</span>
-                </div>
+          <hr className="border-slate-100" />
+
+          {/* Pitch Control */}
+          <div className="space-y-3">
+            <div className="flex justify-between items-center text-sm font-medium text-slate-700">
+              <div className="flex items-center gap-2">
+                <Music className="w-4 h-4 text-pink-500" />
+                <span>ระดับเสียง (Pitch)</span>
+              </div>
+              <span className="bg-pink-100 text-pink-700 px-2 py-0.5 rounded-md text-xs">
+                {settings?.pitch || 1}
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0.5"
+              max="2"
+              step="0.1"
+              value={settings?.pitch || 1}
+              onChange={(e) => handleChange("pitch", parseFloat(e.target.value))}
+              className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-pink-500 hover:accent-pink-400 transition-all"
+            />
+            <div className="flex justify-between text-xs text-slate-400 px-1">
+              <span>ทุ้มต่ำ</span>
+              <span>แหลมสูง</span>
+            </div>
+          </div>
+
+          <hr className="border-slate-100" />
+
+          {/* Volume Control */}
+          <div className="space-y-3">
+            <div className="flex justify-between items-center text-sm font-medium text-slate-700">
+              <div className="flex items-center gap-2">
+                <Volume2 className="w-4 h-4 text-emerald-500" />
+                <span>ความดัง (Volume)</span>
+              </div>
+              <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-md text-xs">
+                {Math.round((settings?.volume || 1) * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.1"
+              value={settings?.volume || 1}
+              onChange={(e) => handleChange("volume", parseFloat(e.target.value))}
+              className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-500 hover:accent-emerald-400 transition-all"
+            />
+          </div>
+        </div>
+      ) : (
+        /* -----------------------------
+            MODE: Voice to Text (STT)
+        ----------------------------- */
+        <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
+          
+          {/* Language Selector */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+              <Languages className="w-4 h-4 text-blue-500" />
+              <span>ภาษาที่รับฟัง (Input Language)</span>
             </div>
             
-            {/* D. Pitch Control */}
-            <div className="control-group">
-                <label className="block text-sm font-medium text-gray-700 mb-2">4. ระดับเสียง (Pitch)</label>
-                <input 
-                    type="range" 
-                    min="-10" max="10" step="1" defaultValue="0" 
-                    className="w-full h-3 bg-blue-100 rounded-lg appearance-none cursor-pointer accent-blue-600" 
-                />
-                <div className="flex justify-between text-xs text-gray-500 mt-1">
-                    <span>ทุ้ม/ต่ำ (-10)</span>
-                    <span>ปกติ (0)</span>
-                    <span>แหลม/สูง (+10)</span>
-                </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => handleChange("language", "th-TH")}
+                className={`p-3 rounded-xl border text-sm font-medium transition-all flex flex-col items-center gap-1 ${
+                  settings?.language === "th-TH"
+                    ? "border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500"
+                    : "border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                }`}
+              >
+                <span className="text-lg">🇹🇭</span>
+                ภาษาไทย
+              </button>
+
+              <button
+                onClick={() => handleChange("language", "en-US")}
+                className={`p-3 rounded-xl border text-sm font-medium transition-all flex flex-col items-center gap-1 ${
+                  settings?.language === "en-US"
+                    ? "border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500"
+                    : "border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                }`}
+              >
+                <span className="text-lg">🇺🇸</span>
+                English
+              </button>
             </div>
+          </div>
 
-            {/* Generation Button */}
-            <button className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold shadow-md hover:bg-purple-700 transition-colors mt-8">
-                🔊 แปลงข้อความและสร้างเสียง
-            </button>
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+            <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Microphone Status</h4>
+            <div className="flex items-center gap-3">
+              <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-sm shadow-red-300"></div>
+              <span className="text-sm text-slate-700">Ready to listen</span>
+            </div>
+          </div>
         </div>
-    );
-};
+      )}
 
-export default VoiceControls;
+      {/* Footer / Reset Button */}
+      <div className="pt-4 border-t border-slate-100 mt-auto">
+        <button
+          onClick={handleReset}
+          className="w-full flex items-center justify-center gap-2 py-2.5 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors group"
+        >
+          <RotateCcw className="w-4 h-4 group-hover:-rotate-180 transition-transform duration-500" />
+          คืนค่าเริ่มต้น (Reset to Default)
+        </button>
+      </div>
+
+    </div>
+  );
+}
