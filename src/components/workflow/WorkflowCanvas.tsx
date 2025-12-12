@@ -36,6 +36,9 @@ export default function WorkflowCanvas({
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+
+  // Ref สำหรับกัน Click event ชนกับ Marquee selection
+  const preventClickRef = useRef(false);
   
   // Node dragging state
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
@@ -76,6 +79,9 @@ export default function WorkflowCanvas({
 
   // Handle panning (middle-click or Alt+left-click or Shift+left-click on empty space)
   const handleMouseDown = (e: React.MouseEvent) => {
+    // Reset prevent click ref
+    preventClickRef.current = false;
+
     const target = e.target as HTMLElement;
     const isCanvasBackground = target === canvasRef.current || target.classList.contains('canvas-transform-layer');
     
@@ -444,6 +450,13 @@ export default function WorkflowCanvas({
       onNodeSelect(null);
     }
 
+    // Check if drag distance is significant to prevent accidental click handling
+    const dx = Math.abs(marqEnd.x - marqStart.x);
+    const dy = Math.abs(marqEnd.y - marqStart.y);
+    if (dx > 2 || dy > 2) {
+        preventClickRef.current = true;
+    }
+
     setIsMarqueeSelecting(false);
     setMarqueeStart(null);
     setMarqueeEnd(null);
@@ -742,14 +755,20 @@ export default function WorkflowCanvas({
         }}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
-          onClick={(e) => {
-            if (e.target === canvasRef.current) {
-              // Clear node and connection selection when clicking background
-              setSelectedNodeIds(new Set());
-              setSelectedConnectionIds(new Set());
-              onNodeSelect(null);
-            }
-          }}
+        onClick={(e) => {
+          // If we just finished a marquee selection, prevent clearing the selection
+          if (preventClickRef.current) {
+            preventClickRef.current = false;
+            return;
+          }
+
+          if (e.target === canvasRef.current) {
+            // Clear node and connection selection when clicking background
+            setSelectedNodeIds(new Set());
+            setSelectedConnectionIds(new Set());
+            onNodeSelect(null);
+          }
+        }}
         style={{
           backgroundImage: `
             radial-gradient(circle, #d1d5db 1px, transparent 1px)
