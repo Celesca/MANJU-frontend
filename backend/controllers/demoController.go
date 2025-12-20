@@ -31,3 +31,8 @@ func (ctrl *DemoController) ValidateWorkflow(c *fiber.Ctx) error {
 func (ctrl *DemoController) GetWorkflowType(c *fiber.Ctx) error {
 	return services.GetWorkflowType(c, ctrl.repo)
 }
+
+// GenerateTTS handles POST /projects/:id/tts
+func (ctrl *DemoController) GenerateTTS(c *fiber.Ctx) error {
+	return services.GenerateTTS(c, ctrl.repo)
+}

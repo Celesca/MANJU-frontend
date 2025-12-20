@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log"
 	"manju/backend/repository"
 	"net/http"
 	"os"
@@ -127,10 +128,12 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 
 	// Call AI service
 	aiServiceURL := getAIServiceURL() + "/chat"
+	log.Printf("[DEBUG] Calling AI service at: %s", aiServiceURL)
 	client := &http.Client{Timeout: 60 * time.Second}
 
 	resp, err := client.Post(aiServiceURL, "application/json", bytes.NewBuffer(requestBody))
 	if err != nil {
+		log.Printf("[ERROR] AI service call failed: %v", err)
 		// If AI service is not available, return a mock response
 		return c.JSON(DemoChatResponse{
 			Response:         "[Demo Mode] AI service is not available. Message received: " + body.Message,
@@ -381,4 +384,77 @@ func GetWorkflowType(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	}
 
 	return c.JSON(workflowTypeResponse)
+}
+
+// TTSRequest represents the request for TTS
+type TTSRequest struct {
+	Text  string `json:"text"`
+	Voice string `json:"voice"`
+	Model string `json:"model"`
+}
+
+// GenerateTTS proxies the TTS request to the AI service and streams the response
+func GenerateTTS(c *fiber.Ctx, repo *repository.ProjectRepository) error {
+	// Get user ID from context
+	userIDStr := c.Locals("userID")
+	if userIDStr == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	// Get project ID from params
+	projectID := c.Params("id")
+	if projectID == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "project id required"})
+	}
+
+	// Get project from database
+	project, err := repo.GetByID(projectID)
+	if err != nil {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "project not found"})
+	}
+
+	// Verify ownership
+	if project.UserID.String() != userIDStr.(string) {
+		return c.Status(http.StatusForbidden).JSON(fiber.Map{"error": "access denied"})
+	}
+
+	// Parse request body
+	var body TTSRequest
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid payload"})
+	}
+
+	if body.Text == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "text is required"})
+	}
+
+	// Default values if not provided
+	if body.Voice == "" {
+		body.Voice = "alloy"
+	}
+	if body.Model == "" {
+		body.Model = "tts-1"
+	}
+
+	requestBody, err := json.Marshal(body)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to build request"})
+	}
+
+	// Call AI service TTS endpoint
+	aiServiceURL := getAIServiceURL() + "/tts"
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	resp, err := client.Post(aiServiceURL, "application/json", bytes.NewBuffer(requestBody))
+	if err != nil {
+		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": "AI service unavailable"})
+	}
+	// Note: We don't defer resp.Body.Close() here because we'll stream it
+
+	// Set response headers
+	c.Set("Content-Type", "audio/mpeg")
+	c.Set("Content-Disposition", "attachment; filename=\"speech.mp3\"")
+
+	// Stream the response from AI service to frontend
+	return c.SendStream(resp.Body)
 }

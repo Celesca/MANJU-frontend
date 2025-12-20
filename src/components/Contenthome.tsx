@@ -109,7 +109,7 @@ const ContentInputPage: React.FC = () => {
   }, [text]);
 
   return (
-    <div className="min-h-screen flex flex-col items-center p-4">
+    <div className=" flex flex-col items-center p-4">
       {/* BG Blur */}
       <div className="absolute inset-0 -z-10">
         <div className="absolute w-[800px] h-[800px] bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-10 top-0 right-0" />

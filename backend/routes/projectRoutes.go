@@ -25,6 +25,7 @@ func ProjectRoutes(app fiber.Router) {
 	router.Post("/:id/demo", demoCtrl.DemoProject)
 	router.Post("/:id/validate", demoCtrl.ValidateWorkflow)
 	router.Get("/:id/workflow-type", demoCtrl.GetWorkflowType)
+	router.Post("/:id/tts", demoCtrl.GenerateTTS)
 
 	// Document management endpoints
 	router.Post("/:id/documents", docCtrl.UploadDocument)
