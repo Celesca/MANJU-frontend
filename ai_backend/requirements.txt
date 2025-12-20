@@ -14,7 +14,7 @@ langchain-community==0.3.1
 litellm==1.48.0
 
 # RAG Support with FAISS
-faiss-cpu==1.8.0
+faiss-cpu
 PyPDF2==3.0.1
 docx2txt==0.8
 

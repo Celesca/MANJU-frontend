@@ -16,6 +16,7 @@ from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
+
 # FAISS and embedding imports
 try:
     import faiss
@@ -26,7 +27,7 @@ try:
         TextLoader,
         Docx2txtLoader,
     )
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
     FAISS_AVAILABLE = True
 except ImportError as e:
     FAISS_AVAILABLE = False
