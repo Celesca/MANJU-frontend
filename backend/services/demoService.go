@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log"
 	"manju/backend/repository"
 	"net/http"
 	"os"
@@ -127,10 +128,12 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 
 	// Call AI service
 	aiServiceURL := getAIServiceURL() + "/chat"
+	log.Printf("[DEBUG] Calling AI service at: %s", aiServiceURL)
 	client := &http.Client{Timeout: 60 * time.Second}
 
 	resp, err := client.Post(aiServiceURL, "application/json", bytes.NewBuffer(requestBody))
 	if err != nil {
+		log.Printf("[ERROR] AI service call failed: %v", err)
 		// If AI service is not available, return a mock response
 		return c.JSON(DemoChatResponse{
 			Response:         "[Demo Mode] AI service is not available. Message received: " + body.Message,
