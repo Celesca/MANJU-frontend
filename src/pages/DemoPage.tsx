@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { 
-  Send, 
-  ChevronLeft, 
-  Loader2, 
-  Bot, 
-  User, 
+import {
+  Send,
+  ChevronLeft,
+  Loader2,
+  Bot,
+  User,
   Settings,
   Zap,
   AlertCircle,
@@ -56,7 +56,7 @@ interface WorkflowType {
 export default function DemoPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  
+
   const [project, setProject] = useState<Project | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -66,7 +66,7 @@ export default function DemoPage() {
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [showDebug, setShowDebug] = useState(false);
   const [workflowType, setWorkflowType] = useState<WorkflowType | null>(null);
-  
+
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
@@ -84,12 +84,13 @@ export default function DemoPage() {
   const vadSpeakingRef = useRef(false);
   const VAD_SILENCE_MS = 1100; // silence duration to auto-send
   const VAD_THRESHOLD = 0.01; // RMS threshold for detecting speech (tweakable)
-  
+
   // Audio playback state
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Load project and validate on mount
   useEffect(() => {
@@ -101,12 +102,12 @@ export default function DemoPage() {
 
       try {
         setLoading(true);
-        
+
         // Load project info
         const projectRes = await fetch(`${API_BASE}/api/projects/${projectId}`, {
           credentials: 'include',
         });
-        
+
         if (!projectRes.ok) {
           if (projectRes.status === 401) {
             navigate('/login');
@@ -114,7 +115,7 @@ export default function DemoPage() {
           }
           throw new Error('Failed to load project');
         }
-        
+
         const projectData = await projectRes.json();
         setProject(projectData);
 
@@ -128,17 +129,17 @@ export default function DemoPage() {
             credentials: 'include',
           }),
         ]);
-        
+
         if (validateRes.ok) {
           const validationData = await validateRes.json();
           setValidation(validationData);
         }
-        
+
         if (workflowTypeRes.ok) {
           const workflowTypeData = await workflowTypeRes.json();
           setWorkflowType(workflowTypeData);
         }
-        
+
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred');
       } finally {
@@ -168,7 +169,7 @@ export default function DemoPage() {
     // For demo, we'll use a placeholder transcription
     // In production, this would call a speech-to-text API
     const mockTranscription = "[Voice message received]";
-    
+
     // Create user message
     const userMessage: Message = {
       id: `msg-${Date.now()}-user`,
@@ -208,7 +209,7 @@ export default function DemoPage() {
       }
 
       const data = await res.json();
-      
+
       const assistantMessage: Message = {
         id: `msg-${Date.now()}-assistant`,
         role: 'assistant',
@@ -220,12 +221,12 @@ export default function DemoPage() {
       };
 
       setMessages(prev => [...prev, assistantMessage]);
-      
+
       // If voice output, play the audio
       if (workflowType?.output_type === 'voice') {
         speakResponse(data.response);
       }
-      
+
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send message');
       setMessages(prev => prev.filter(m => m.id !== userMessage.id));
@@ -300,7 +301,7 @@ export default function DemoPage() {
     } catch (err) {
       console.warn('VAD start failed', err);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inputValue, interimTranscript, VAD_SILENCE_MS, VAD_THRESHOLD]);
 
   const stopVADMonitoring = useCallback(() => {
@@ -379,7 +380,7 @@ export default function DemoPage() {
     }
   }, [stopVADMonitoring]);
 
-  
+
 
   const startRecording = useCallback(async () => {
     // If Web Speech API is available, use it for real-time recognition
@@ -402,23 +403,23 @@ export default function DemoPage() {
       // start VAD monitoring based on the same stream (so we can auto-stop on silence)
       try { await startVADMonitoring(stream); } catch (err) { console.warn('VAD start failed', err); }
       const chunks: Blob[] = [];
-      
+
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
           chunks.push(e.data);
         }
       };
-      
+
       recorder.onstop = async () => {
         const audioBlob = new Blob(chunks, { type: 'audio/webm' });
-        
+
         // Convert to text using Web Speech API or send to backend for transcription
         await handleVoiceInput(audioBlob);
-        
+
         // Stop all tracks
         stream.getTracks().forEach(track => track.stop());
       };
-      
+
       setMediaRecorder(recorder);
       recorder.start();
       setIsRecording(true);
@@ -450,24 +451,52 @@ export default function DemoPage() {
     }
   }, [mediaRecorder, isRecording, isRecognizing, stopVADMonitoring]);
 
-  // Text-to-speech for voice output
-  const speakResponse = (text: string) => {
-    if ('speechSynthesis' in window) {
-      // Cancel any ongoing speech
-      window.speechSynthesis.cancel();
-      
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.0;
-      utterance.pitch = 1.0;
-      utterance.volume = 1.0;
-      
-      window.speechSynthesis.speak(utterance);
+  // Text-to-speech for voice output using backend OpenAI TTS
+  const speakResponse = async (text: string) => {
+    try {
+      // Cancel any ongoing audio
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+
+      const res = await fetch(`${API_BASE}/api/projects/${projectId}/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          text: text,
+          voice: 'alloy', // You can make this configurable
+          model: 'tts-1'
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to generate speech');
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+
+      audio.onended = () => {
+        setPlayingAudioId(null);
+        URL.revokeObjectURL(url);
+      };
+
+      await audio.play();
+    } catch (err) {
+      console.error('TTS error:', err);
+      setPlayingAudioId(null);
+      // Fallback to browser TTS if desired, or just show error
     }
   };
 
   const stopSpeaking = () => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
     }
     setPlayingAudioId(null);
   };
@@ -511,7 +540,7 @@ export default function DemoPage() {
       }
 
       const data = await res.json();
-      
+
       const assistantMessage: Message = {
         id: `msg-${Date.now()}-assistant`,
         role: 'assistant',
@@ -523,12 +552,12 @@ export default function DemoPage() {
       };
 
       setMessages(prev => [...prev, assistantMessage]);
-      
+
       // If voice output workflow, automatically speak the response
       if (workflowType?.output_type === 'voice') {
         speakResponse(data.response);
       }
-      
+
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send message');
       // Remove the user message if we failed
@@ -565,7 +594,7 @@ export default function DemoPage() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <Navbar />
-      
+
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-4 py-3 pt-20">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
@@ -585,13 +614,12 @@ export default function DemoPage() {
               <p className="text-xs text-gray-500">Test your workflow</p>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowDebug(!showDebug)}
-              className={`p-2 rounded-lg transition-colors ${
-                showDebug ? 'bg-purple-100 text-purple-700' : 'text-gray-500 hover:bg-gray-100'
-              }`}
+              className={`p-2 rounded-lg transition-colors ${showDebug ? 'bg-purple-100 text-purple-700' : 'text-gray-500 hover:bg-gray-100'
+                }`}
               title="Toggle debug info"
             >
               <Settings className="w-5 h-5" />
@@ -672,17 +700,16 @@ export default function DemoPage() {
                     <Bot className="w-5 h-5 text-purple-600" />
                   </div>
                 )}
-                
+
                 <div className={`max-w-[75%] ${message.role === 'user' ? 'order-1' : ''}`}>
                   <div
-                    className={`rounded-2xl px-4 py-2.5 ${
-                      message.role === 'user'
+                    className={`rounded-2xl px-4 py-2.5 ${message.role === 'user'
                         ? 'bg-purple-600 text-white'
                         : 'bg-white border border-gray-200 text-gray-800'
-                    }`}
+                      }`}
                   >
                     <p className="whitespace-pre-wrap">{message.content}</p>
-                    
+
                     {/* Voice output controls for assistant messages */}
                     {message.role === 'assistant' && workflowType?.output_type === 'voice' && (
                       <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-2">
@@ -712,7 +739,7 @@ export default function DemoPage() {
                       </div>
                     )}
                   </div>
-                  
+
                   {/* Debug info for assistant messages */}
                   {showDebug && message.role === 'assistant' && (
                     <div className="mt-1 text-xs text-gray-400 flex items-center gap-2 flex-wrap">
@@ -728,7 +755,7 @@ export default function DemoPage() {
                     </div>
                   )}
                 </div>
-                
+
                 {message.role === 'user' && (
                   <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center shrink-0 order-2">
                     <User className="w-5 h-5 text-gray-600" />
@@ -736,7 +763,7 @@ export default function DemoPage() {
                 )}
               </motion.div>
             ))}
-            
+
             {sending && (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
@@ -754,7 +781,7 @@ export default function DemoPage() {
                 </div>
               </motion.div>
             )}
-            
+
             <div ref={messagesEndRef} />
           </div>
         )}
@@ -781,19 +808,17 @@ export default function DemoPage() {
           {/* Workflow Type Indicator */}
           {workflowType && (
             <div className="flex items-center justify-center gap-2 mb-3">
-              <span className={`px-2 py-0.5 text-xs rounded-full ${
-                workflowType.input_type === 'voice' 
-                  ? 'bg-blue-100 text-blue-700' 
+              <span className={`px-2 py-0.5 text-xs rounded-full ${workflowType.input_type === 'voice'
+                  ? 'bg-blue-100 text-blue-700'
                   : 'bg-gray-100 text-gray-600'
-              }`}>
+                }`}>
                 {workflowType.input_type === 'voice' ? '🎤 Voice Input' : '⌨️ Text Input'}
               </span>
               <span className="text-gray-400">→</span>
-              <span className={`px-2 py-0.5 text-xs rounded-full ${
-                workflowType.output_type === 'voice' 
-                  ? 'bg-green-100 text-green-700' 
+              <span className={`px-2 py-0.5 text-xs rounded-full ${workflowType.output_type === 'voice'
+                  ? 'bg-green-100 text-green-700'
                   : 'bg-gray-100 text-gray-600'
-              }`}>
+                }`}>
                 {workflowType.output_type === 'voice' ? '🔊 Voice Output' : '💬 Text Output'}
               </span>
             </div>
@@ -806,11 +831,10 @@ export default function DemoPage() {
                 <motion.button
                   onClick={(isRecognizing || isRecording) ? stopRecording : startRecording}
                   disabled={sending}
-                  className={`p-6 rounded-full transition-all ${
-                    (isRecognizing || isRecording)
+                  className={`p-6 rounded-full transition-all ${(isRecognizing || isRecording)
                       ? 'bg-red-500 hover:bg-red-600 animate-pulse'
                       : 'bg-purple-600 hover:bg-purple-700'
-                  } text-white disabled:opacity-50 disabled:cursor-not-allowed`}
+                    } text-white disabled:opacity-50 disabled:cursor-not-allowed`}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >
@@ -839,7 +863,7 @@ export default function DemoPage() {
               {interimTranscript && (
                 <div className="text-sm text-gray-500 italic">{interimTranscript}</div>
               )}
-              
+
               {/* Also allow text input as fallback */}
               <div className="w-full flex items-center gap-3 mt-2">
                 <input
@@ -891,9 +915,9 @@ export default function DemoPage() {
               </motion.button>
             </div>
           )}
-          
+
           <p className="text-xs text-gray-400 mt-2 text-center">
-            {workflowType?.input_type === 'voice' 
+            {workflowType?.input_type === 'voice'
               ? 'Speak or type your message • Your workflow runs on each message'
               : 'Press Enter to send • Your workflow runs on each message'
             }

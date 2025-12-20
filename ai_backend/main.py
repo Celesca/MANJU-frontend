@@ -10,9 +10,11 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+from openai import OpenAI
 
 from workflow_executor import WorkflowExecutor, DocumentEmbeddingService
 
@@ -26,15 +28,23 @@ logger = logging.getLogger(__name__)
 # Global instances
 executor: Optional[WorkflowExecutor] = None
 embedding_service: Optional[DocumentEmbeddingService] = None
+openai_client: Optional[OpenAI] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown events."""
-    global executor, embedding_service
+    global executor, embedding_service, openai_client
     logger.info("Starting AI Workflow Service...")
     executor = WorkflowExecutor()
     embedding_service = DocumentEmbeddingService()
+    
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key:
+        openai_client = OpenAI(api_key=api_key)
+    else:
+        logger.warning("OPENAI_API_KEY not found. TTS will not be available.")
+        
     yield
     logger.info("Shutting down AI Workflow Service...")
 
@@ -119,6 +129,13 @@ class WorkflowTypeResponse(BaseModel):
     has_rag: bool
     has_sheets: bool
     has_condition: bool
+
+
+class TTSRequest(BaseModel):
+    """Request for Text-to-Speech."""
+    text: str
+    voice: str = "alloy"
+    model: str = "tts-1"
 
 
 # =============================================================================
@@ -212,6 +229,34 @@ async def get_workflow_type(workflow: WorkflowConfig):
     except Exception as e:
         logger.exception("Error detecting workflow type")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tts")
+async def text_to_speech(request: TTSRequest):
+    """
+    Convert text to speech using OpenAI TTS.
+    Returns an MP3 audio stream.
+    """
+    if openai_client is None:
+        raise HTTPException(status_code=503, detail="OpenAI client not initialized (check API key)")
+    
+    if not request.text:
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    try:
+        response = openai_client.audio.speech.create(
+            model=request.model,
+            voice=request.voice,
+            input=request.text,
+        )
+        
+        # We can use the response object directly as a generator for StreamingResponse
+        # or call response.iter_bytes()
+        return StreamingResponse(response.iter_bytes(), media_type="audio/mpeg")
+        
+    except Exception as e:
+        logger.exception("Error in TTS generation")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # =============================================================================
