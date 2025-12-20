@@ -211,43 +211,38 @@ func Callback(c *fiber.Ctx) error {
 	c.Cookie(cookie)
 	// -------------------------------------------------------------
 
+	// 1. เตรียม Map ข้อมูลที่จะใส่ใน Cookie
+	cookieData := map[string]interface{}{
+		"id":            user.ID,
+		"email":         user.Email,
+		"name":          user.Name,
+		"picture":       gu["picture"],  // ดึงรูปจาก Google
+		"regist_source": "google_oauth", // ค่าที่เพิ่มเอง
+	}
 
-    // 1. เตรียม Map ข้อมูลที่จะใส่ใน Cookie
-    cookieData := map[string]interface{}{
-        "id":            user.ID,
-        "email":         user.Email,
-        "name":          user.Name,
-        "picture":       gu["picture"],     // ดึงรูปจาก Google
-        "regist_source": "google_oauth",    // ค่าที่เพิ่มเอง
-    }
+	// 2. ดึงค่าจาก Cookie เดิม (เช่น pref_lang) มาใส่
+	if pref := c.Cookies("pref_lang"); pref != "" {
+		cookieData["preference_language"] = pref
+	} else {
+		cookieData["preference_language"] = "th" // ค่า Default ถ้าไม่มี
+	}
 
-    // 2. ดึงค่าจาก Cookie เดิม (เช่น pref_lang) มาใส่
-    if pref := c.Cookies("pref_lang"); pref != "" {
-        cookieData["preference_language"] = pref
-    } else {
-        cookieData["preference_language"] = "th" // ค่า Default ถ้าไม่มี
-    }
+	// 3. แปลงเป็น JSON String และ Encode เป็น Base64 เพื่อความปลอดภัยใน Cookie
+	userDataBytes, _ := json.Marshal(cookieData)
+	userDataString := base64.StdEncoding.EncodeToString(userDataBytes)
 
-    // 3. แปลงเป็น JSON String
-    userDataBytes, _ := json.Marshal(cookieData)
-    userDataString := string(userDataBytes)
-    
-    // **ตัวเลือกเสริม:** ถ้าข้อมูลมีภาษาไทยหรืออักขระพิเศษ แนะนำให้ encode เป็น Base64
-    // userDataString = base64.StdEncoding.EncodeToString(userDataBytes) 
+	// 4. สร้าง Cookie ก้อนที่ 2 ชื่อ "manju_user"
+	c.Cookie(&fiber.Cookie{
+		Name:     "manju_user", // ชื่อ Cookie สำหรับเก็บข้อมูล User
+		Value:    userDataString,
+		Expires:  time.Now().Add(7 * 24 * time.Hour),
+		HTTPOnly: false,
+		Secure:   false,
+		SameSite: "Lax",
+		Path:     "/",
+	})
 
-    // 4. สร้าง Cookie ก้อนที่ 2 ชื่อ "manju_user"
-    c.Cookie(&fiber.Cookie{
-        Name:     "manju_user",      // ชื่อ Cookie สำหรับเก็บข้อมูล User
-        Value:    userDataString,
-        Expires:  time.Now().Add(7 * 24 * time.Hour),
-        // HTTPOnly: false,          // ⚠️ ตั้งเป็น false ถ้าอยากให้ Frontend (React) อ่านได้ทันที
-        HTTPOnly: false,              // ตั้งเป็น true ถ้าใช้แค่ใน Backend (ปลอดภัยกว่า)
-        Secure:   false,             // false=Localhost, true=Production
-        SameSite: "Lax",             // สำคัญมาก
-        Path:     "/",
-    })
-
-    // -------------------------------------------------------------
+	// -------------------------------------------------------------
 	// clear oauth state
 	c.ClearCookie("oauthstate")
 
@@ -305,17 +300,17 @@ func Logout(c *fiber.Ctx) error {
 	// 2. สร้าง Cookie "manju_session" ใหม่เพื่อสั่งลบตัวเก่า
 	c.Cookie(&fiber.Cookie{
 		Name:     "manju_session",
-		Value:    "",                       // ค่าว่าง
-		Path:     "/",                      // <--- สำคัญมาก! ต้องตรงกับที่เห็นใน Browser
+		Value:    "",                             // ค่าว่าง
+		Path:     "/",                            // <--- สำคัญมาก! ต้องตรงกับที่เห็นใน Browser
 		Expires:  time.Now().Add(-1 * time.Hour), // หมดอายุทันที (ย้อนหลัง 1 ชม.)
-		HTTPOnly: true,                     // ต้องตรงกับตอนสร้าง
+		HTTPOnly: true,                           // ต้องตรงกับตอนสร้าง
 	})
 
 	// 3. สร้าง Cookie "oauthstate" ใหม่เพื่อสั่งลบตัวเก่า
 	c.Cookie(&fiber.Cookie{
 		Name:     "oauthstate",
 		Value:    "",
-		Path:     "/",                      // <--- สำคัญมาก!
+		Path:     "/", // <--- สำคัญมาก!
 		Expires:  time.Now().Add(-1 * time.Hour),
 		HTTPOnly: true,
 	})
@@ -326,11 +321,11 @@ func Logout(c *fiber.Ctx) error {
 		Value:    "",
 		Path:     "/",
 		Expires:  time.Now().Add(-1 * time.Hour),
-		HTTPOnly: false,                    // ตัวนี้ Frontend อ่านได้ (HttpOnly: false)
+		HTTPOnly: false, // ตัวนี้ Frontend อ่านได้ (HttpOnly: false)
 	})
 
 	// 5. ส่ง Response กลับไปให้ Frontend
-	// แนะนำให้ส่ง JSON Status OK แทน Redirect 
+	// แนะนำให้ส่ง JSON Status OK แทน Redirect
 	// เพื่อให้ Frontend (fetch) รู้ว่าสำเร็จแน่นอน แล้วค่อยสั่ง reload หน้า
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"message": "Logged out successfully",

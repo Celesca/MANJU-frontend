@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, X, ChevronRight, LogOut, User as  ChevronDown } from "lucide-react";
+import { Menu, X, ChevronRight, LogOut, User as ChevronDown } from "lucide-react";
 
 interface UserData {
   id: string;
@@ -12,10 +12,12 @@ interface UserData {
   regist_source?: string;
 }
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-  
+
   const [user, setUser] = useState<UserData | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
@@ -34,14 +36,28 @@ const Navbar = () => {
   useEffect(() => {
     const checkUserLogin = () => {
       const userCookie = getCookie("manju_user");
+      console.log("Checking manju_user cookie (raw):", userCookie);
       if (userCookie) {
         try {
-          const userData = JSON.parse(decodeURIComponent(userCookie));
+          // Decode from Base64
+          const decodedValue = atob(decodeURIComponent(userCookie));
+          console.log("Decoded user data string:", decodedValue);
+          const userData = JSON.parse(decodedValue);
+          console.log("Parsed user data object:", userData);
           setUser(userData);
         } catch (error) {
           console.error("Failed to parse user cookie", error);
-          setUser(null);
+          // Fallback: try parsing without atob in case it's not base64 yet
+          try {
+            const userData = JSON.parse(decodeURIComponent(userCookie));
+            setUser(userData);
+          } catch (e) {
+            setUser(null);
+          }
         }
+      } else {
+        console.log("No manju_user cookie found");
+        setUser(null);
       }
     };
     checkUserLogin();
@@ -56,13 +72,17 @@ const Navbar = () => {
   }, []);
 
   const handleLogout = async () => {
+    console.log("Attempting logout...");
     try {
-      const res = await fetch("http://localhost:8080/auth/logout", {
+      const res = await fetch(`${API_BASE}/auth/logout`, {
         method: "GET",
         credentials: "include",
       });
 
+      console.log("Logout response status:", res.status);
       if (res.ok) {
+        const data = await res.json();
+        console.log("Logout successful:", data);
         setUser(null);
         setIsProfileOpen(false);
         document.cookie.split(";").forEach((c) => {
@@ -70,7 +90,7 @@ const Navbar = () => {
             .replace(/^ +/, "")
             .replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
         });
-        window.location.href = "/login"; 
+        window.location.href = "/login";
       }
     } catch (error) {
       console.error("Logout failed", error);
@@ -78,7 +98,7 @@ const Navbar = () => {
   };
 
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
-    e.currentTarget.onerror = null; 
+    e.currentTarget.onerror = null;
     e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || 'User')}&background=random&color=fff`;
   };
 
@@ -104,11 +124,10 @@ const Navbar = () => {
     <>
       <header
         className={`fixed top-0 left-0 w-full z-50 transition-all duration-300 ease-in-out
-        ${
-          scrolled
+        ${scrolled
             ? "bg-white/80 backdrop-blur-md border-b border-white/20 shadow-sm py-3"
             : "bg-transparent py-5"
-        }`}
+          }`}
       >
         <nav className="max-w-7xl mx-auto flex items-center justify-between px-6">
           <Link to="/" className="flex items-center gap-2 cursor-pointer group">
@@ -145,7 +164,7 @@ const Navbar = () => {
                 >
                   <img
                     src={user.picture}
-                    onError={handleImageError} 
+                    onError={handleImageError}
                     alt={user.name}
                     className="w-8 h-8 rounded-full border border-white/50 shadow-sm object-cover"
                   />
@@ -167,14 +186,14 @@ const Navbar = () => {
                         <p className="text-sm font-semibold text-slate-800 truncate">{user.name}</p>
                         <p className="text-xs text-slate-500 truncate">{user.email}</p>
                       </div>
-                      
+
                       {/* <Link to="/profile" className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-purple-50 hover:text-purple-700 transition-colors">
                         <UserIcon size={16} />
                         Profile
                       </Link> */}
-                      
+
                       <div className="border-t border-slate-100 my-1"></div>
-                      
+
                       <button
                         onClick={handleLogout}
                         className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
@@ -197,14 +216,14 @@ const Navbar = () => {
                 <Link
                   to="/login"
                 >
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="bg-slate-900 text-white px-5 py-2.5 rounded-full text-sm font-semibold shadow-lg shadow-slate-900/20 hover:shadow-slate-900/40 flex items-center gap-2 transition-all"
-                >
-                  Get Started
-                  <ChevronRight size={16} />
-                </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="bg-slate-900 text-white px-5 py-2.5 rounded-full text-sm font-semibold shadow-lg shadow-slate-900/20 hover:shadow-slate-900/40 flex items-center gap-2 transition-all"
+                  >
+                    Get Started
+                    <ChevronRight size={16} />
+                  </motion.button>
                 </Link>
               </>
             )}
@@ -232,16 +251,16 @@ const Navbar = () => {
             <div className="flex flex-col p-6 space-y-4">
               {user && (
                 <div className="flex items-center gap-3 pb-4 border-b border-slate-200">
-                   <img 
-                      src={user.picture} 
-                      onError={handleImageError} 
-                      alt={user.name} 
-                      className="w-10 h-10 rounded-full object-cover" 
-                   />
-                   <div className="flex flex-col">
-                      <span className="font-semibold text-slate-800">{user.name}</span>
-                      <span className="text-xs text-slate-500">{user.email}</span>
-                   </div>
+                  <img
+                    src={user.picture}
+                    onError={handleImageError}
+                    alt={user.name}
+                    className="w-10 h-10 rounded-full object-cover"
+                  />
+                  <div className="flex flex-col">
+                    <span className="font-semibold text-slate-800">{user.name}</span>
+                    <span className="text-xs text-slate-500">{user.email}</span>
+                  </div>
                 </div>
               )}
 
@@ -255,18 +274,18 @@ const Navbar = () => {
                   {link.name}
                 </a>
               ))}
-              
+
               <hr className="border-slate-200 my-2" />
-              
+
               <div className="flex flex-col gap-3">
                 {user ? (
-                   <button 
+                  <button
                     onClick={handleLogout}
                     className="w-full py-3 flex items-center justify-center gap-2 text-red-600 font-medium bg-red-50 rounded-lg hover:bg-red-100 transition-colors"
-                   >
-                     <LogOut size={18} />
-                     Sign out
-                   </button>
+                  >
+                    <LogOut size={18} />
+                    Sign out
+                  </button>
                 ) : (
                   <>
                     <Link to="/login" className="w-full">
