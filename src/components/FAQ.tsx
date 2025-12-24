@@ -189,9 +189,12 @@ const FaqPage = () => {
         {/* --- Footer Call to Action --- */}
         <div className="text-center mt-16 pt-10 border-t border-gray-100">
             <p className="text-gray-600 mb-4">ยังไม่พบคำตอบที่คุณต้องการ?</p>
-            <button className="px-8 py-3 bg-gray-900 hover:bg-gray-800 text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
+            <a 
+                href="mailto:siratee6775@gmail.com?cc=folk.sawit@gmail.com&subject=ติดต่อสอบถามทีมงาน%20Support"
+                className="inline-block px-8 py-3 bg-gray-900 hover:bg-gray-800 text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1"
+            >
                 ติดต่อทีมงาน Support
-            </button>
+            </a>
         </div>
 
       </div>

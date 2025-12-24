@@ -23,7 +23,7 @@ const Navbar = () => {
 
   const location = useLocation();
 
-  const whiteBgPages = ["/projects", "/profile", "/login", "/demo", "/settings", "/dashboard"];
+  const whiteBgPages = ["/projects", "/profile", "/login", "/demo", "/features", "/pricing", "/about"];
   const isWhitePage = whiteBgPages.some(path => location.pathname.startsWith(path));
 
   const getCookie = (name: string) => {
@@ -115,9 +115,9 @@ const Navbar = () => {
   const navLinks = [
     { name: "Home", href: "/" },
     { name: "Projects", href: "/projects" },
-    { name: "Features", href: "#" },
-    { name: "About", href: "#" },
-    { name: "Pricing", href: "#" },
+    { name: "Features", href: "/features" },
+    { name: "About", href: "/about" },
+    { name: "Pricing", href: "/pricing" },
   ];
 
   return (

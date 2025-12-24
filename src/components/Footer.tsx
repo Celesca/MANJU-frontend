@@ -1,4 +1,20 @@
+import { useState } from 'react';
+
 const Footer = () => {
+  // 1. สร้าง State สำหรับเก็บค่าอีเมลที่พิมพ์
+  const [email, setEmail] = useState('');
+
+  // 2. ฟังก์ชันทำงานเมื่อกดปุ่ม Subscribe
+  const handleSubscribe = () => {
+    const recipient = "siratee6775@gmail.com";
+    const cc = "folk.sawit@gmail.com";
+    const subject = "ขอสมัครรับข่าวสาร (Newsletter Subscription)";
+    const body = `สวัสดีทีมงาน,\n\nฉันต้องการสมัครรับข่าวสารของ MANJU\nอีเมลของฉันคือ: ${email || "ไม่ได้ระบุ"}`;
+
+    // เปิดแอปอีเมล
+    window.location.href = `mailto:${recipient}?cc=${cc}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  };
+
   return (
     <footer className="bg-slate-900 text-slate-300 relative overflow-hidden">
       
@@ -24,14 +40,19 @@ const Footer = () => {
               แพลตฟอร์มสร้าง AI Agent แบบ No-Code ที่ทรงพลังที่สุด ออกแบบ Workflow เชื่อมต่อ Database และ Deploy ได้ในไม่กี่คลิก
             </p>
             
-            {/* Newsletter Input (Optional) */}
+            {/* Newsletter Input (แก้ไขส่วนนี้) */}
             <div className="flex gap-2">
                <input 
                  type="email" 
                  placeholder="Enter your email" 
+                 value={email} // ผูกค่ากับ State
+                 onChange={(e) => setEmail(e.target.value)} // อัปเดต State เมื่อพิมพ์
                  className="bg-slate-800 border border-slate-700 text-slate-200 text-sm rounded-lg px-4 py-2 w-full focus:outline-none focus:border-violet-500 transition-colors"
                />
-               <button className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+               <button 
+                 onClick={handleSubscribe} // เรียกฟังก์ชันเมื่อกดปุ่ม
+                 className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+               >
                  Subscribe
                </button>
             </div>

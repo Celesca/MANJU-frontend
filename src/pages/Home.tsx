@@ -208,7 +208,7 @@ export default function Home() {
               </ul>
 
               <div className="pt-4">
-                <a href="#tech-details" className="inline-flex items-center font-semibold text-violet-600 hover:text-violet-700 transition-colors group">
+                <a href="/features" className="inline-flex items-center font-semibold text-violet-600 hover:text-violet-700 transition-colors group">
                   Learn more about our tech
                   <svg className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path></svg>
                 </a>
