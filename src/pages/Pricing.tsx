@@ -1,15 +1,10 @@
 import React, { useState } from 'react';
+import type { FAQItemProps } from '../interfaces/Pricing';
+import PricingFeature from '../components/PricingFeature';
+import Navbar from '../components/Navbar';
 
-// 1. สร้าง Interface สำหรับ Props ของ Icon
-interface CheckIconProps {
-  color?: string; // เครื่องหมาย ? แปลว่าเป็น Optional (ไม่ต้องใส่ก็ได้ เพราะมีค่า Default)
-}
-
-// 2. สร้าง Interface สำหรับ Props ของ FAQ
-interface FAQItemProps {
-  question: string;
-  answer: string;
-}
+const CONTACT_EMAIL = "siratee6775@gmail.com";
+const CC_EMAIL = "folk.sawit@gmail.com";
 
 const PricingSection: React.FC = () => {
   const [isAnnual, setIsAnnual] = useState<boolean>(true);
@@ -22,6 +17,7 @@ const PricingSection: React.FC = () => {
       <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
 
       <div className="max-w-7xl mx-auto px-6 md:px-12 lg:px-16 relative z-10">
+        <Navbar />
         
         {/* Header */}
         <div className="text-center max-w-3xl mx-auto mb-16">
@@ -64,22 +60,15 @@ const PricingSection: React.FC = () => {
             <button className="w-full py-2.5 rounded-xl border-2 border-slate-900 text-slate-900 font-semibold hover:bg-slate-900 hover:text-white transition-colors mb-8">
               เริ่มต้นใช้งานฟรี
             </button>
-            <ul className="space-y-4 text-sm text-slate-600">
-              <li className="flex items-start gap-3">
-                <CheckIcon /> <span><strong>500 นาที</strong> Voice Processing / เดือน</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <CheckIcon /> <span>สร้างได้ <strong>1 Agent Workflow</strong></span>
-              </li>
-              <li className="flex items-start gap-3">
-                <CheckIcon /> <span>Standard TTS Voice (Typhoon)</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <CheckIcon /> <span>เชื่อมต่อ Google Sheets (Read-only)</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <CheckIcon /> <span>Community Support</span>
-              </li>
+            
+            <ul className="space-y-4 text-sm">
+              <PricingFeature>
+                <strong>500 นาที</strong> Voice Processing / เดือน
+              </PricingFeature>
+              <PricingFeature>สร้างได้ <strong>1 Agent Workflow</strong></PricingFeature>
+              <PricingFeature>Standard TTS Voice (Typhoon)</PricingFeature>
+              <PricingFeature>เชื่อมต่อ Google Sheets (Read-only)</PricingFeature>
+              <PricingFeature>Community Support</PricingFeature>
             </ul>
           </div>
 
@@ -93,29 +82,18 @@ const PricingSection: React.FC = () => {
               <span className="text-slate-400 text-sm"> / เดือน</span>
             </div>
             <button className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 transition-colors shadow-lg shadow-violet-600/30 mb-8">
-              <a href="mailto:siratee6775@gmail.com?cc=folk.sawit@gmail.com&subject=ติดต่อสอบถามทีมงาน%20Support">
+              <a href={`mailto:${CONTACT_EMAIL}?cc=${CC_EMAIL}&subject=สนใจแพ็กเกจ%20Pro%20Business`}>
                 เริ่มใช้งานแพ็กเกจ Pro Business
-            </a>
+              </a>
             </button>
+            
             <ul className="space-y-4 text-sm text-slate-300">
-              <li className="flex items-start gap-3">
-                <CheckIcon color="text-violet-400" /> <span><strong>5,000 นาที</strong> Voice Processing</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <CheckIcon color="text-violet-400" /> <span>ไม่จำกัด Agent Workflow</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <CheckIcon color="text-violet-400" /> <span><strong>Voice Cloning</strong> (สร้างเสียงแบรนด์เองได้)</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <CheckIcon color="text-violet-400" /> <span>Google Sheets Real-time Sync (Read/Write)</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <CheckIcon color="text-violet-400" /> <span>RAG Knowledge Base (อัปโหลด PDF ไม่จำกัด)</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <CheckIcon color="text-violet-400" /> <span>Priority GPU Processing</span>
-              </li>
+              <PricingFeature iconColor="text-violet-400"><strong>5,000 นาที</strong> Voice Processing</PricingFeature>
+              <PricingFeature iconColor="text-violet-400">ไม่จำกัด Agent Workflow</PricingFeature>
+              <PricingFeature iconColor="text-violet-400"><strong>Voice Cloning</strong> (สร้างเสียงแบรนด์เองได้)</PricingFeature>
+              <PricingFeature iconColor="text-violet-400">Google Sheets Real-time Sync (Read/Write)</PricingFeature>
+              <PricingFeature iconColor="text-violet-400">RAG Knowledge Base (อัปโหลด PDF ไม่จำกัด)</PricingFeature>
+              <PricingFeature iconColor="text-violet-400">Priority GPU Processing</PricingFeature>
             </ul>
           </div>
 
@@ -127,29 +105,18 @@ const PricingSection: React.FC = () => {
               <span className="text-4xl font-bold text-slate-900">Custom</span>
             </div>
             <button className="w-full py-2.5 rounded-xl border border-slate-200 text-slate-600 font-semibold hover:border-slate-900 hover:text-slate-900 transition-colors mb-8">
-              <a href="mailto:siratee6775@gmail.com?cc=folk.sawit@gmail.com&subject=ติดต่อสอบถามทีมงาน%20Support">
+              <a href={`mailto:${CONTACT_EMAIL}?cc=${CC_EMAIL}&subject=สนใจแพ็กเกจ%20Enterprise`}>
                 ติดต่อทีมงานเพื่อเสนอราคา
-            </a>
+              </a>
             </button>
-            <ul className="space-y-4 text-sm text-slate-600">
-              <li className="flex items-start gap-3">
-                <CheckIcon /> <span><strong>Unlimited</strong> Voice Processing</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <CheckIcon /> <span>On-Premise Deployment (ติดตั้งบน Server องค์กร)</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <CheckIcon /> <span>เชื่อมต่อ CRM / Ticketing System</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <CheckIcon /> <span>Fine-tune LLM เฉพาะองค์กร</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <CheckIcon /> <span>Dedicated Support Manager (24/7)</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <CheckIcon /> <span>SLA 99.9% Uptime Guarantee</span>
-              </li>
+            
+            <ul className="space-y-4 text-sm">
+              <PricingFeature><strong>Unlimited</strong> Voice Processing</PricingFeature>
+              <PricingFeature>On-Premise Deployment</PricingFeature>
+              <PricingFeature>เชื่อมต่อ CRM / Ticketing System</PricingFeature>
+              <PricingFeature>Fine-tune LLM เฉพาะองค์กร</PricingFeature>
+              <PricingFeature>Dedicated Support Manager (24/7)</PricingFeature>
+              <PricingFeature>SLA 99.9% Uptime Guarantee</PricingFeature>
             </ul>
           </div>
 
@@ -170,14 +137,7 @@ const PricingSection: React.FC = () => {
   );
 };
 
-// --- Sub-components ที่มีการระบุ Type ---
-
-const CheckIcon: React.FC<CheckIconProps> = ({ color = "text-green-500" }) => (
-  <svg className={`w-5 h-5 ${color} flex-shrink-0`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-  </svg>
-);
-
+// Sub-component FAQItem
 const FAQItem: React.FC<FAQItemProps> = ({ question, answer }) => (
     <div className="border-b border-slate-200 pb-4">
         <h4 className="font-semibold text-slate-800 mb-2">{question}</h4>

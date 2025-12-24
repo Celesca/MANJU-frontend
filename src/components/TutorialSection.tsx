@@ -160,7 +160,7 @@ return (
             
             <div className="pt-4 pl-16">
               <button className="px-6 py-2.5 rounded-full bg-slate-900 text-white font-medium hover:bg-violet-600 transition-colors shadow-lg shadow-slate-900/20 flex items-center gap-2 group text-sm">
-                Start Building
+                <a href="/projects">Start Building</a>
                 <svg className="w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 8l4 4m0 0l-4 4m4-4H3" />
                 </svg>

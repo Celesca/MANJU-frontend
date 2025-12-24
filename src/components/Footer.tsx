@@ -1,18 +1,16 @@
 import { useState } from 'react';
 
+const CONTACT_EMAIL = "siratee6775@gmail.com";
+const CC_EMAIL = "folk.sawit@gmail.com";
+
 const Footer = () => {
-  // 1. สร้าง State สำหรับเก็บค่าอีเมลที่พิมพ์
   const [email, setEmail] = useState('');
 
-  // 2. ฟังก์ชันทำงานเมื่อกดปุ่ม Subscribe
   const handleSubscribe = () => {
-    const recipient = "siratee6775@gmail.com";
-    const cc = "folk.sawit@gmail.com";
     const subject = "ขอสมัครรับข่าวสาร (Newsletter Subscription)";
     const body = `สวัสดีทีมงาน,\n\nฉันต้องการสมัครรับข่าวสารของ MANJU\nอีเมลของฉันคือ: ${email || "ไม่ได้ระบุ"}`;
 
-    // เปิดแอปอีเมล
-    window.location.href = `mailto:${recipient}?cc=${cc}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = `mailto:${CONTACT_EMAIL}?cc=${CC_EMAIL}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
   return (
@@ -40,7 +38,7 @@ const Footer = () => {
               แพลตฟอร์มสร้าง AI Agent แบบ No-Code ที่ทรงพลังที่สุด ออกแบบ Workflow เชื่อมต่อ Database และ Deploy ได้ในไม่กี่คลิก
             </p>
             
-            {/* Newsletter Input (แก้ไขส่วนนี้) */}
+            {/* Newsletter Input */}
             <div className="flex gap-2">
                <input 
                  type="email" 

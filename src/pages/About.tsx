@@ -1,80 +1,25 @@
 import { Github, Linkedin, Mail, Trophy, Code2, Terminal } from 'lucide-react';
 
-// --- IMPORT IMAGES ---
-// นำรูปภาพที่คุณอัปโหลดไปใส่ใน folder assets แล้ว import เข้ามาครับ
-import sawitImg from '../assets/folk.png';   // รูปคุณ Sawit (Folk)
-import sirateeImg from '../assets/otwo.jpg'; // รูปคุณ Siratee (Oat)
-import punchayaImg from '../assets/kaew.png'; // รูปคุณ Punchaya (Pang)
+// --- IMPORT DATA & IMAGES ---
+import aboutData from '../documents/Data-About.json'; // ตรวจสอบ path ว่าถูกต้องนะครับ
+
+import sawitImg from '../assets/folk.png';
+import sirateeImg from '../assets/otwo.jpg';
+import punchayaImg from '../assets/kaew.png';
 import Navbar from '../components/Navbar';
+
+// Map ชื่อไฟล์จาก JSON ให้ตรงกับตัวแปรที่ Import รูปภาพเข้ามา
+const imageMap: { [key: string]: string } = {
+  "../assets/folk.png": sawitImg,
+  "../assets/otwo.jpg": sirateeImg,
+  "../assets/kaew.png": punchayaImg
+};
+
+const CONTACT_EMAIL = "siratee6775@gmail.com";
+const CC_EMAIL = "folk.sawit@gmail.com";
 
 const AboutPage = () => {
   
-  // ข้อมูลสมาชิกทีม (ดึงจากรูปภาพและเอกสารที่ส่งมา)
-  const teamMembers = [
-    {
-      id: "sawit",
-      name: "Sawit Koseeyaumporn",
-      nickname: "Folk",
-      role: "AI Engineer / System Architect",
-      img: sawitImg,
-      bio: "Computer Engineering Student @KMUTT. ปัจจุบันเป็น Machine Learning Engineer ที่ SCB และมีประสบการณ์ฝึกงานด้าน AI Engineer อย่างเข้มข้น มีความเชี่ยวชาญด้าน MLOps และ System Architecture",
-      skills: ["Python", "Machine Learning", "DevOps", "Docker", "SCG", "SCB"],
-      achievements: [
-        "Gold Medal Super AI Engineer Season 5 (Track 2: AI Engineer)",
-        "Winner GenAI Hackathon by Mitr Phol Group",
-        "Winner BDI Hackathon AI & Data Innovation",
-        "Beta Microsoft Learn Student Ambassador"
-      ],
-      socials: {
-        github: "https://github.com/Celesca",
-        email: "folk.sawit@gmail.com",
-        linkedin: "#"
-      },
-      color: "from-blue-500 to-indigo-600"
-    },
-    {
-      id: "siratee",
-      name: "Siratee Saiprom",
-      nickname: "Otwo",
-      role: "Full-Stack Developer / UX/UI",
-      img: sirateeImg,
-      bio: "Web Full-Stack Developer และ Automate QA Tester ผู้หลงใหลในการสร้างสรรค์เว็บไซต์ที่มีประสิทธิภาพ มุ่งมั่นในการพัฒนาตนเองและประยุกต์ใช้ความรู้เพื่อส่งมอบผลงานที่มีคุณภาพสูงสุด",
-      skills: ["TypeScript", "React", "Next.js", "Python", "Docker", "Figma", "Automate Test"],
-      achievements: [
-        "Full-Stack Development Specialist",
-        "Experience in Automated QA Testing",
-        "Exceptional Teamwork & Collaboration Skills"
-      ],
-      socials: {
-        github: "https://github.com/SOtwoX1",
-        email: "siratee6775@gmail.com",
-        linkedin: "#"
-      },
-      color: "from-violet-500 to-purple-600"
-    },
-    {
-      id: "punchaya",
-      name: "Punchaya Chancharoen",
-      nickname: "Kaewkloaw",
-      role: "Creative Design / Documentation",
-      img: punchayaImg,
-      bio: "A blooming tech enthusiast who blends code with creativity. นักพัฒนาที่ผสมผสานโค้ดเข้ากับความคิดสร้างสรรค์ เชี่ยวชาญทั้งด้านการออกแบบ UX/UI และการเขียนโปรแกรมฝั่ง Frontend",
-      skills: ["Vue.js", "React", "Figma", "Adobe XD", "Python", "C++", "Power Apps"],
-      achievements: [
-        "The Winner, GenAI Hackathon Powered by Mitr Phol Group 2025",
-        "The 2nd Runner-Up, KBTG Showcase & Project Pitching Day 2025",
-        "Top 9 Finalist, Axtra Mile Hackathon 2025",
-        "Honorable Mention, SuperAI Innovator 2025"
-      ],
-      socials: {
-        github: "https://github.com/Kaewkloaw",
-        email: "punchaya.chan@gmail.com", // แก้ไขเป็นอีเมลจริงถ้ามี
-        linkedin: "#"
-      },
-      color: "from-pink-500 to-rose-500"
-    }
-  ];
-
   return (
     <div className="bg-slate-50 min-h-screen">
       <Navbar />
@@ -96,7 +41,8 @@ const AboutPage = () => {
 
           {/* 3 Cards Row */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-            {teamMembers.map((member) => (
+            {/* ✅ แก้ไขตรงนี้: ใช้ aboutData.map แทน teamMembers.map */}
+            {aboutData.map((member) => (
               <a 
                 href={`#${member.id}`} 
                 key={member.id}
@@ -104,8 +50,9 @@ const AboutPage = () => {
               >
                 <div className={`absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r ${member.color} rounded-t-2xl`} />
                 <div className="w-32 h-32 mx-auto mb-6 rounded-full p-1 bg-gradient-to-tr from-slate-200 to-white shadow-inner">
+                  {/* ✅ เรียกใช้รูปภาพจาก imageMap */}
                   <img 
-                    src={member.img} 
+                    src={imageMap[member.img]} 
                     alt={member.name} 
                     className="w-full h-full object-cover rounded-full border-4 border-white shadow-sm group-hover:scale-105 transition-transform duration-500" 
                   />
@@ -130,7 +77,8 @@ const AboutPage = () => {
 
       {/* --- DETAILED SECTIONS --- */}
       <div className="max-w-7xl mx-auto px-6 py-12 space-y-24">
-        {teamMembers.map((member, index) => (
+        {/* ✅ แก้ไขตรงนี้เช่นกัน: ใช้ aboutData.map */}
+        {aboutData.map((member, index) => (
           <div 
             key={member.id} 
             id={member.id} 
@@ -140,10 +88,10 @@ const AboutPage = () => {
             <div className="w-full lg:w-1/3 relative group">
               <div className={`absolute inset-0 bg-gradient-to-tr ${member.color} rounded-[2rem] rotate-6 opacity-20 group-hover:rotate-3 transition-transform duration-500`}></div>
               <div className="relative rounded-[2rem] overflow-hidden border-8 border-white shadow-2xl">
-                <img src={member.img} alt={member.name} className="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+                <img src={imageMap[member.img]} alt={member.name} className="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
               </div>
               
-              {/* Floating Badge (Example) */}
+              {/* Floating Badge */}
               <div className="absolute -bottom-6 -right-6 bg-white p-4 rounded-xl shadow-xl border border-slate-100 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-300">
                  <div className={`p-2 rounded-lg bg-gradient-to-r ${member.color} text-white`}>
                     <Code2 size={20} />
@@ -218,7 +166,7 @@ const AboutPage = () => {
       {/* --- FOOTER CTA --- */}
       <div className="py-20 text-center bg-slate-900 mt-12">
         <h2 className="text-3xl font-bold text-white mb-6">Want to work with us?</h2>
-        <a href="mailto:folk.sawit@gmail.com" className="inline-block px-8 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-full font-medium transition-colors shadow-lg shadow-violet-500/30">
+        <a href={`mailto:${CONTACT_EMAIL}?cc=${CC_EMAIL}&subject=ติดต่อสอบถามทีมงาน%20Support`} className="inline-block px-8 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-full font-medium transition-colors shadow-lg shadow-violet-500/30">
           Contact Our Team
         </a>
       </div>
