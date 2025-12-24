@@ -62,8 +62,8 @@ const Footer = () => {
           <div className="lg:col-span-1">
             <h4 className="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Product</h4>
             <ul className="space-y-3 text-sm">
-              <li><a href="#" className="hover:text-violet-400 transition-colors">Features</a></li>
-              <li><a href="#" className="hover:text-violet-400 transition-colors">Pricing</a></li>
+              <li><a href="/features" className="hover:text-violet-400 transition-colors">Features</a></li>
+              <li><a href="/pricing" className="hover:text-violet-400 transition-colors">Pricing</a></li>
             </ul>
           </div>
 
@@ -71,7 +71,7 @@ const Footer = () => {
           <div className="lg:col-span-1">
             <h4 className="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Resources</h4>
             <ul className="space-y-3 text-sm">
-              <li><a href="#" className="hover:text-violet-400 transition-colors">Documentation</a></li>
+              <li><a href="/features" className="hover:text-violet-400 transition-colors">Documentation</a></li>
             </ul>
           </div>
 
@@ -79,8 +79,8 @@ const Footer = () => {
           <div className="lg:col-span-1">
             <h4 className="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Company</h4>
             <ul className="space-y-3 text-sm">
-              <li><a href="#" className="hover:text-violet-400 transition-colors">About</a></li>
-              <li><a href="#" className="hover:text-violet-400 transition-colors">Contact</a></li>
+              <li><a href="/about" className="hover:text-violet-400 transition-colors">About</a></li>
+              <li><a href="/about" className="hover:text-violet-400 transition-colors">Contact</a></li>
             </ul>
           </div>
 
