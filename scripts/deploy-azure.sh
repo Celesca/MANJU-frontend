@@ -3,10 +3,16 @@
 # Configuration
 RESOURCE_GROUP="manju-universe-rg"
 LOCATION="southeastasia"
-ACR_NAME="manjuacr$(date +%s)" # Unique ACR name
+ACR_NAME="manjuuniverseacr"
 ACA_ENV_NAME="manju-env"
 BACKEND_APP_NAME="manju-backend"
 AI_BACKEND_APP_NAME="manju-ai-backend"
+
+# PostgreSQL Configuration
+DB_SERVER_NAME=""
+DB_NAME=""
+DB_USER=""
+DB_PASSWORD=""
 
 echo "Using Resource Group: $RESOURCE_GROUP"
 echo "Using Location: $LOCATION"
@@ -23,6 +29,38 @@ ACR_LOGIN_SERVER=$(az acr show --name $ACR_NAME --query loginServer --output tsv
 ACR_USERNAME=$(az acr credential show --name $ACR_NAME --query username --output tsv)
 ACR_PASSWORD=$(az acr credential show --name $ACR_NAME --query passwords[0].value --output tsv)
 
+# Create Azure Database for PostgreSQL Flexible Server
+echo "Creating Azure Database for PostgreSQL Flexible Server..."
+az postgres flexible-server create \
+  --resource-group $RESOURCE_GROUP \
+  --name $DB_SERVER_NAME \
+  --location $LOCATION \
+  --admin-user $DB_USER \
+  --admin-password $DB_PASSWORD \
+  --sku-name Standard_B1ms \
+  --tier Burstable \
+  --public-access 0.0.0.0 \
+  --database-name $DB_NAME \
+  --yes
+
+# Add firewall rule for current IP to allow initialization
+echo "Adding firewall rule for your current IP..."
+CURRENT_IP=$(curl -s https://api.ipify.org)
+if [ ! -z "$CURRENT_IP" ]; then
+    az postgres flexible-server firewall-rule create \
+      --resource-group $RESOURCE_GROUP \
+      --name $DB_SERVER_NAME \
+      --rule-name AllowMyIP \
+      --start-ip-address $CURRENT_IP \
+      --end-ip-address $CURRENT_IP
+    echo "Added firewall rule for IP: $CURRENT_IP"
+else
+    echo "Warning: Could not determine your public IP. You may need to add a firewall rule in the Azure portal manually."
+fi
+
+
+DB_HOST="$DB_SERVER_NAME.postgres.database.azure.com"
+
 # Build and Push Backend Image
 echo "Building and pushing Backend..."
 az acr build --registry $ACR_NAME --image $BACKEND_APP_NAME:latest ./backend
@@ -34,7 +72,7 @@ az acr build --registry $ACR_NAME --image $AI_BACKEND_APP_NAME:latest ./ai_backe
 # Create Container Apps Environment
 az containerapp env create --name $ACA_ENV_NAME --resource-group $RESOURCE_GROUP --location $LOCATION
 
-# Deploy AI Backend first (so backend can point to it)
+# Deploy AI Backend
 echo "Deploying AI Backend..."
 az containerapp create \
   --name $AI_BACKEND_APP_NAME \
@@ -49,9 +87,8 @@ az containerapp create \
   --env-vars AI_SERVICE_PORT=5000
 
 AI_BACKEND_URL=$(az containerapp show --name $AI_BACKEND_APP_NAME --resource-group $RESOURCE_GROUP --query properties.configuration.ingress.fqdn --output tsv)
-echo "AI Backend URL: https://$AI_BACKEND_URL"
 
-# Deploy Backend
+# Deploy Backend with DB Connection
 echo "Deploying Backend..."
 az containerapp create \
   --name $BACKEND_APP_NAME \
@@ -63,9 +100,21 @@ az containerapp create \
   --registry-server $ACR_LOGIN_SERVER \
   --registry-username $ACR_USERNAME \
   --registry-password $ACR_PASSWORD \
-  --env-vars AI_SERVICE_URL=https://$AI_BACKEND_URL
+  --env-vars \
+    AI_SERVICE_URL=https://$AI_BACKEND_URL \
+    DB_HOST=$DB_HOST \
+    DB_PORT=5432 \
+    DB_USER=$DB_USER \
+    DB_PASSWORD=$DB_PASSWORD \
+    DB_NAME=$DB_NAME \
+    SSL_MODE=require
 
 BACKEND_URL=$(az containerapp show --name $BACKEND_APP_NAME --resource-group $RESOURCE_GROUP --query properties.configuration.ingress.fqdn --output tsv)
-echo "Backend URL: https://$BACKEND_URL"
 
+echo "---------------------------------------------------"
 echo "Deployment complete!"
+echo "Backend URL: https://$BACKEND_URL"
+echo "AI Backend URL: https://$AI_BACKEND_URL"
+echo "PostgreSQL Host: $DB_HOST"
+echo "---------------------------------------------------"
+echo "To initialize the database, run: ./scripts/init-db.sh $DB_HOST $DB_USER $DB_PASSWORD $DB_NAME"
