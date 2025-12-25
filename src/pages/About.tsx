@@ -1,30 +1,178 @@
-export default function About() {
-  const cards = [
-    { title: "Card 1", description: "This is the first card." },
-    { title: "Card 2", description: "This is the second card." },
-    { title: "Card 3", description: "This is the third card." },
-    { title: "Card 4", description: "This is the fourth card." },
-  ];
+import { Github, Linkedin, Mail, Trophy, Code2, Terminal } from 'lucide-react';
 
+// --- IMPORT DATA & IMAGES ---
+import aboutData from '../documents/Data-About.json'; // ตรวจสอบ path ว่าถูกต้องนะครับ
+
+import sawitImg from '../assets/folk.png';
+import sirateeImg from '../assets/otwo.jpg';
+import punchayaImg from '../assets/kaew.png';
+import Navbar from '../components/Navbar';
+
+// Map ชื่อไฟล์จาก JSON ให้ตรงกับตัวแปรที่ Import รูปภาพเข้ามา
+const imageMap: { [key: string]: string } = {
+  "../assets/folk.png": sawitImg,
+  "../assets/otwo.jpg": sirateeImg,
+  "../assets/kaew.png": punchayaImg
+};
+
+const CONTACT_EMAIL = "siratee6775@gmail.com";
+const CC_EMAIL = "folk.sawit@gmail.com";
+
+const AboutPage = () => {
+  
   return (
-    <div className="min-h-screen bg-gradient-to-r from-purple-700 via-indigo-700 to-blue-800 p-6">
-      <h1 className="text-4xl font-bold mb-8 text-white text-center">About Us</h1>
-      <p className="text-gray-200 mb-12 text-center max-w-xl mx-auto">
-        Welcome to our About page! Here you can describe your company, project, or yourself.
-      </p>
+    <div className="bg-slate-50 min-h-screen">
+      <Navbar />
+      
+      {/* --- HERO SECTION: TEAM OVERVIEW --- */}
+      <div className="pt-24 pb-16 bg-white relative overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] opacity-50"></div>
+        
+        <div className="max-w-7xl mx-auto px-6 relative z-10 text-center">
+          <span className="text-violet-600 font-bold tracking-wider text-sm uppercase mb-2 block">
+            The Creators
+          </span>
+          <h1 className="text-4xl md:text-6xl font-extrabold text-slate-900 mb-6">
+            Meet the <span className="text-transparent bg-clip-text bg-gradient-to-r from-violet-600 to-indigo-600">MANJU Team</span>
+          </h1>
+          <p className="text-slate-600 max-w-2xl mx-auto text-lg mb-16">
+            เบื้องหลังนวัตกรรม AI ที่สร้างสรรค์เทคโนโลยีเพื่อยกระดับการสื่อสาร
+          </p>
 
-      {/* Grid การ์ด 2x2 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 max-w-4xl mx-auto">
-        {cards.map((card, index) => (
-          <div
-            key={index}
-            className="bg-white rounded-xl shadow-lg p-6 hover:scale-105 transform transition duration-300"
+          {/* 3 Cards Row */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+            {/* ✅ แก้ไขตรงนี้: ใช้ aboutData.map แทน teamMembers.map */}
+            {aboutData.map((member) => (
+              <a 
+                href={`#${member.id}`} 
+                key={member.id}
+                className="group relative bg-white rounded-2xl p-6 border border-slate-200 shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-2 cursor-pointer"
+              >
+                <div className={`absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r ${member.color} rounded-t-2xl`} />
+                <div className="w-32 h-32 mx-auto mb-6 rounded-full p-1 bg-gradient-to-tr from-slate-200 to-white shadow-inner">
+                  {/* ✅ เรียกใช้รูปภาพจาก imageMap */}
+                  <img 
+                    src={imageMap[member.img]} 
+                    alt={member.name} 
+                    className="w-full h-full object-cover rounded-full border-4 border-white shadow-sm group-hover:scale-105 transition-transform duration-500" 
+                  />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-1">{member.name}</h3>
+                <p className="text-violet-600 text-sm font-medium mb-2">{member.role}</p>
+                <div className="flex justify-center gap-3 opacity-60 group-hover:opacity-100 transition-opacity">
+                   <div className="w-8 h-1 rounded-full bg-slate-200 group-hover:bg-slate-300 transition-colors" />
+                </div>
+              </a>
+            ))}
+          </div>
+          
+          <div className="mt-16 animate-bounce text-slate-400">
+            <svg className="w-6 h-6 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+            </svg>
+            <span className="text-xs">Scroll to know us better</span>
+          </div>
+        </div>
+      </div>
+
+      {/* --- DETAILED SECTIONS --- */}
+      <div className="max-w-7xl mx-auto px-6 py-12 space-y-24">
+        {/* ✅ แก้ไขตรงนี้เช่นกัน: ใช้ aboutData.map */}
+        {aboutData.map((member, index) => (
+          <div 
+            key={member.id} 
+            id={member.id} 
+            className={`flex flex-col lg:flex-row gap-12 items-center ${index % 2 !== 0 ? 'lg:flex-row-reverse' : ''} scroll-mt-24`}
           >
-            <h2 className="text-2xl font-semibold mb-2">{card.title}</h2>
-            <p className="text-gray-700">{card.description}</p>
+            {/* Image Column */}
+            <div className="w-full lg:w-1/3 relative group">
+              <div className={`absolute inset-0 bg-gradient-to-tr ${member.color} rounded-[2rem] rotate-6 opacity-20 group-hover:rotate-3 transition-transform duration-500`}></div>
+              <div className="relative rounded-[2rem] overflow-hidden border-8 border-white shadow-2xl">
+                <img src={imageMap[member.img]} alt={member.name} className="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+              </div>
+              
+              {/* Floating Badge */}
+              <div className="absolute -bottom-6 -right-6 bg-white p-4 rounded-xl shadow-xl border border-slate-100 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-300">
+                 <div className={`p-2 rounded-lg bg-gradient-to-r ${member.color} text-white`}>
+                    <Code2 size={20} />
+                 </div>
+                 <div>
+                    <div className="text-xs text-slate-500 font-bold uppercase">Nickname</div>
+                    <div className="text-sm font-bold text-slate-800">{member.nickname}</div>
+                 </div>
+              </div>
+            </div>
+
+            {/* Content Column */}
+            <div className="w-full lg:w-2/3">
+              <div className="mb-6">
+                <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-2">{member.name}</h2>
+                <div className={`inline-block px-3 py-1 rounded-full text-sm font-semibold text-white bg-gradient-to-r ${member.color}`}>
+                  {member.role}
+                </div>
+              </div>
+
+              <div className="prose prose-slate text-slate-600 mb-8 leading-relaxed text-lg">
+                <p>{member.bio}</p>
+              </div>
+
+              {/* Skills Grid */}
+              <div className="mb-8">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-3 flex items-center gap-2">
+                  <Terminal size={16} /> Skill
+                </h4>
+                <div className="flex flex-wrap gap-2">
+                  {member.skills.map((skill, idx) => (
+                    <span key={idx} className="px-3 py-1 bg-slate-100 text-slate-600 text-sm font-medium rounded-md border border-slate-200 hover:border-violet-300 hover:bg-violet-50 transition-colors">
+                      {skill}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Achievements List */}
+              <div className="mb-8 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <Trophy size={16} className="text-yellow-500" /> Highlights & Achievements
+                </h4>
+                <ul className="space-y-3">
+                  {member.achievements.map((achieve, idx) => (
+                    <li key={idx} className="flex items-start gap-3 text-slate-600 text-sm">
+                      <div className={`mt-1.5 w-1.5 h-1.5 rounded-full bg-gradient-to-r ${member.color} flex-shrink-0`} />
+                      {achieve}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Social Links */}
+              <div className="flex gap-4">
+                <a href={member.socials.github} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors">
+                  <Github size={24} />
+                </a>
+                <a href={`mailto:${member.socials.email}`} className="p-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors">
+                  <Mail size={24} />
+                </a>
+                <a href={member.socials.linkedin} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                  <Linkedin size={24} />
+                </a>
+              </div>
+
+            </div>
           </div>
         ))}
       </div>
+
+      {/* --- FOOTER CTA --- */}
+      <div className="py-20 text-center bg-slate-900 mt-12">
+        <h2 className="text-3xl font-bold text-white mb-6">Want to work with us?</h2>
+        <a href={`mailto:${CONTACT_EMAIL}?cc=${CC_EMAIL}&subject=ติดต่อสอบถามทีมงาน%20Support`} className="inline-block px-8 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-full font-medium transition-colors shadow-lg shadow-violet-500/30">
+          Contact Our Team
+        </a>
+      </div>
+
     </div>
   );
-}
+};
+
+export default AboutPage;

@@ -1,4 +1,18 @@
+import { useState } from 'react';
+
+const CONTACT_EMAIL = "siratee6775@gmail.com";
+const CC_EMAIL = "folk.sawit@gmail.com";
+
 const Footer = () => {
+  const [email, setEmail] = useState('');
+
+  const handleSubscribe = () => {
+    const subject = "ขอสมัครรับข่าวสาร (Newsletter Subscription)";
+    const body = `สวัสดีทีมงาน,\n\nฉันต้องการสมัครรับข่าวสารของ MANJU\nอีเมลของฉันคือ: ${email || "ไม่ได้ระบุ"}`;
+
+    window.location.href = `mailto:${CONTACT_EMAIL}?cc=${CC_EMAIL}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  };
+
   return (
     <footer className="bg-slate-900 text-slate-300 relative overflow-hidden">
       
@@ -24,14 +38,19 @@ const Footer = () => {
               แพลตฟอร์มสร้าง AI Agent แบบ No-Code ที่ทรงพลังที่สุด ออกแบบ Workflow เชื่อมต่อ Database และ Deploy ได้ในไม่กี่คลิก
             </p>
             
-            {/* Newsletter Input (Optional) */}
+            {/* Newsletter Input */}
             <div className="flex gap-2">
                <input 
                  type="email" 
                  placeholder="Enter your email" 
+                 value={email} // ผูกค่ากับ State
+                 onChange={(e) => setEmail(e.target.value)} // อัปเดต State เมื่อพิมพ์
                  className="bg-slate-800 border border-slate-700 text-slate-200 text-sm rounded-lg px-4 py-2 w-full focus:outline-none focus:border-violet-500 transition-colors"
                />
-               <button className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+               <button 
+                 onClick={handleSubscribe} // เรียกฟังก์ชันเมื่อกดปุ่ม
+                 className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+               >
                  Subscribe
                </button>
             </div>
@@ -41,8 +60,8 @@ const Footer = () => {
           <div className="lg:col-span-1">
             <h4 className="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Product</h4>
             <ul className="space-y-3 text-sm">
-              <li><a href="#" className="hover:text-violet-400 transition-colors">Features</a></li>
-              <li><a href="#" className="hover:text-violet-400 transition-colors">Pricing</a></li>
+              <li><a href="/features" className="hover:text-violet-400 transition-colors">Features</a></li>
+              <li><a href="/pricing" className="hover:text-violet-400 transition-colors">Pricing</a></li>
             </ul>
           </div>
 
@@ -50,7 +69,7 @@ const Footer = () => {
           <div className="lg:col-span-1">
             <h4 className="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Resources</h4>
             <ul className="space-y-3 text-sm">
-              <li><a href="#" className="hover:text-violet-400 transition-colors">Documentation</a></li>
+              <li><a href="/features" className="hover:text-violet-400 transition-colors">Documentation</a></li>
             </ul>
           </div>
 
@@ -58,8 +77,8 @@ const Footer = () => {
           <div className="lg:col-span-1">
             <h4 className="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Company</h4>
             <ul className="space-y-3 text-sm">
-              <li><a href="#" className="hover:text-violet-400 transition-colors">About</a></li>
-              <li><a href="#" className="hover:text-violet-400 transition-colors">Contact</a></li>
+              <li><a href="/about" className="hover:text-violet-400 transition-colors">About</a></li>
+              <li><a href="/about" className="hover:text-violet-400 transition-colors">Contact</a></li>
             </ul>
           </div>
 

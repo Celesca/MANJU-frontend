@@ -1,0 +1,64 @@
+[
+  {
+    "id": "sawit",
+    "name": "Sawit Koseeyaumporn",
+    "nickname": "Folk",
+    "role": "AI Engineer / System Architect",
+    "img": "../assets/folk.png",
+    "bio": "Computer Engineering Student @KMUTT. ปัจจุบันเป็น Machine Learning Engineer ที่ SCB และมีประสบการณ์ฝึกงานด้าน AI Engineer อย่างเข้มข้น มีความเชี่ยวชาญด้าน MLOps และ System Architecture",
+    "skills": ["Python", "Machine Learning", "DevOps", "Docker", "SCG", "SCB"],
+    "achievements": [
+      "Gold Medal Super AI Engineer Season 5 (Track 2: AI Engineer)",
+      "Winner GenAI Hackathon by Mitr Phol Group",
+      "Winner BDI Hackathon AI & Data Innovation",
+      "Beta Microsoft Learn Student Ambassador"
+    ],
+    "socials": {
+      "github": "https://github.com/Celesca",
+      "email": "folk.sawit@gmail.com",
+      "linkedin": "#"
+    },
+    "color": "from-blue-500 to-indigo-600"
+  },
+  {
+    "id": "siratee",
+    "name": "Siratee Saiprom",
+    "nickname": "Otwo",
+    "role": "Full-Stack Developer / UX/UI",
+    "img": "../assets/otwo.jpg",
+    "bio": "Web Full-Stack Developer และ Automate QA Tester ผู้หลงใหลในการสร้างสรรค์เว็บไซต์ที่มีประสิทธิภาพ มุ่งมั่นในการพัฒนาตนเองและประยุกต์ใช้ความรู้เพื่อส่งมอบผลงานที่มีคุณภาพสูงสุด",
+    "skills": ["TypeScript", "React", "Next.js", "Python", "Docker", "Figma", "Automate Test"],
+    "achievements": [
+      "Full-Stack Development Specialist",
+      "Experience in Automated QA Testing",
+      "Exceptional Teamwork & Collaboration Skills"
+    ],
+    "socials": {
+      "github": "https://github.com/SOtwoX1",
+      "email": "siratee6775@gmail.com",
+      "linkedin": "#"
+    },
+    "color": "from-violet-500 to-purple-600"
+  },
+  {
+    "id": "punchaya",
+    "name": "Punchaya Chancharoen",
+    "nickname": "Kaewkloaw",
+    "role": "Creative Design / Documentation",
+    "img": "../assets/kaew.png",
+    "bio": "A blooming tech enthusiast who blends code with creativity. นักพัฒนาที่ผสมผสานโค้ดเข้ากับความคิดสร้างสรรค์ เชี่ยวชาญทั้งด้านการออกแบบ UX/UI และการเขียนโปรแกรมฝั่ง Frontend",
+    "skills": ["Vue.js", "React", "Figma", "Adobe XD", "Python", "C++", "Power Apps"],
+    "achievements": [
+      "The Winner, GenAI Hackathon Powered by Mitr Phol Group 2025",
+      "The 2nd Runner-Up, KBTG Showcase & Project Pitching Day 2025",
+      "Top 9 Finalist, Axtra Mile Hackathon 2025",
+      "Honorable Mention, SuperAI Innovator 2025"
+    ],
+    "socials": {
+      "github": "https://github.com/Kaewkloaw",
+      "email": "punchaya.chan@gmail.com",
+      "linkedin": "#"
+    },
+    "color": "from-pink-500 to-rose-500"
+  }
+]

@@ -2,6 +2,9 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Plus, Minus, HelpCircle, FileText, CreditCard, Settings } from 'lucide-react';
 
+const CONTACT_EMAIL = "siratee6775@gmail.com";
+const CC_EMAIL = "folk.sawit@gmail.com";
+
 // --- 1. ข้อมูลตัวอย่าง (FAQ Data) ---
 // ปรับเนื้อหาให้เข้ากับ Project MANJU (AI Voice/TTS)
 const faqData = [
@@ -186,13 +189,16 @@ const FaqPage = () => {
           </AnimatePresence>
         </motion.div>
         
-        {/* --- Footer Call to Action --- */}
-        <div className="text-center mt-16 pt-10 border-t border-gray-100">
-            <p className="text-gray-600 mb-4">ยังไม่พบคำตอบที่คุณต้องการ?</p>
-            <button className="px-8 py-3 bg-gray-900 hover:bg-gray-800 text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
-                ติดต่อทีมงาน Support
-            </button>
-        </div>
+        {/* --- Call to Action Section --- */}
+      <div className="text-center mt-16 pt-10 border-t border-gray-100">
+        <p className="text-gray-600 mb-4">ยังไม่พบคำตอบที่คุณต้องการ?</p>
+        <a 
+          href={`mailto:${CONTACT_EMAIL}?cc=${CC_EMAIL}&subject=ติดต่อสอบถามทีมงาน%20Support`}
+          className="inline-block px-8 py-3 bg-gray-900 hover:bg-gray-800 text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1"
+        >
+          ติดต่อทีมงาน Support
+        </a>
+      </div>
 
       </div>
     </div>
