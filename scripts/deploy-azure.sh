@@ -84,6 +84,8 @@ az containerapp create \
   --registry-server $ACR_LOGIN_SERVER \
   --registry-username $ACR_USERNAME \
   --registry-password $ACR_PASSWORD \
+  --min-replicas 1 \
+  --max-replicas 3 \
   --env-vars AI_SERVICE_PORT=5000
 
 AI_BACKEND_URL=$(az containerapp show --name $AI_BACKEND_APP_NAME --resource-group $RESOURCE_GROUP --query properties.configuration.ingress.fqdn --output tsv)
@@ -107,7 +109,9 @@ az containerapp create \
     DB_USER=$DB_USER \
     DB_PASSWORD=$DB_PASSWORD \
     DB_NAME=$DB_NAME \
-    SSL_MODE=require
+    SSL_MODE=require \
+  --min-replicas 1 \
+  --max-replicas 3
 
 BACKEND_URL=$(az containerapp show --name $BACKEND_APP_NAME --resource-group $RESOURCE_GROUP --query properties.configuration.ingress.fqdn --output tsv)
 

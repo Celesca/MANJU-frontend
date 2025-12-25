@@ -9,7 +9,7 @@ import (
 
 // Session model stores server-side session and refresh token
 type Session struct {
-	ID           uuid.UUID  `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
+	ID           uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	UserID       uuid.UUID  `gorm:"type:uuid;not null" json:"user_id"`
 	RefreshToken string     `gorm:"type:text" json:"refresh_token"`
 	ExpiresAt    *time.Time `json:"expires_at"`

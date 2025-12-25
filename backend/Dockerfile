@@ -1,8 +1,8 @@
-FROM golang:1.24-alpine
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
-# Install git and build dependencies for go
+# Install build dependencies
 RUN apk add --no-cache git build-base
 
 COPY go.mod go.sum ./
@@ -10,5 +10,19 @@ RUN go mod download
 
 COPY . .
 
-# Using go run main.go as requested by the user
-CMD ["go", "run", "main.go"]
+# Build the application
+RUN go build -o main main.go
+
+# Use a smaller image for production
+FROM alpine:latest
+WORKDIR /app
+RUN apk add --no-cache ca-certificates
+
+COPY --from=builder /app/main .
+COPY --from=builder /app/.env* ./
+
+# Expose port
+EXPOSE 8080
+
+CMD ["./main"]
+

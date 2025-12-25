@@ -36,3 +36,5 @@ jobs:
           containerAppName: manju-backend
           resourceGroup: manju-universe-rg
           imageToDeploy: ${{ secrets.ACR_NAME }}.azurecr.io/manju-backend:${{ github.sha }}
+          containerAppConfigPath: .github/configs/backend-config.yaml
+

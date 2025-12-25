@@ -10,7 +10,7 @@ import (
 
 // Project represents a workflow project owned by a user
 type Project struct {
-	ID          uuid.UUID      `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
+	ID          uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	UserID      uuid.UUID      `gorm:"type:uuid;not null;index" json:"user_id"`
 	Name        string         `gorm:"not null" json:"name"`
 	Description string         `json:"description"`
