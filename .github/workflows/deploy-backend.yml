@@ -1,0 +1,38 @@
+name: Deploy Backend to Azure
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Log in to ACR
+        run: az acr login --name ${{ secrets.ACR_NAME }}
+
+      - name: Build and push image to ACR
+        run: |
+          az acr build --registry ${{ secrets.ACR_NAME }} --image manju-backend:${{ github.sha }} ./backend
+          az acr build --registry ${{ secrets.ACR_NAME }} --image manju-backend:latest ./backend
+
+      - name: Deploy to Azure Container Apps
+        uses: azure/container-apps-deploy-action@v1
+        with:
+          acrName: ${{ secrets.ACR_NAME }}
+          containerAppName: manju-backend
+          resourceGroup: manju-universe-rg
+          imageToDeploy: ${{ secrets.ACR_NAME }}.azurecr.io/manju-backend:${{ github.sha }}
