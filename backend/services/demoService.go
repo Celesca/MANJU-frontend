@@ -99,8 +99,12 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	}
 
 	// Inject userId and projectId into RAG nodes so AI executor can locate FAISS index
+	// Also check for selectedApiKeyId in AI model nodes
+	var selectedKeyID string
 	for i, node := range nodes {
-		if nodeType, ok := node["type"].(string); ok && nodeType == "rag-documents" {
+		nodeType, _ := node["type"].(string)
+
+		if nodeType == "rag-documents" {
 			nodeData, ok := node["data"].(map[string]interface{})
 			if !ok {
 				nodeData = map[string]interface{}{}
@@ -109,14 +113,33 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 			nodeData["projectId"] = projectID
 			nodes[i]["data"] = nodeData
 		}
+
+		// Check AI model nodes for selected API key
+		if nodeType == "ai-model" {
+			nodeData, ok := node["data"].(map[string]interface{})
+			if ok {
+				if keyID, exists := nodeData["selectedApiKeyId"].(string); exists && keyID != "" {
+					selectedKeyID = keyID
+				}
+			}
+		}
 	}
 
-	// Retrieve user's API key
-	userRepo := repository.New(repository.GetDB())
-	user, err := userRepo.GetByID(userIDStr.(string))
+	// Retrieve API key - prioritize selected key from workflow, fall back to user's default
 	var userAPIKey string
-	if err == nil && user != nil && user.EncryptedAPIKey != "" {
-		userAPIKey, _ = DecryptAPIKey(user.EncryptedAPIKey)
+	if selectedKeyID != "" {
+		// Use specifically selected key from workflow
+		keyRepo := repository.NewUserAPIKeyRepository(repository.GetDB())
+		userAPIKey, _ = GetDecryptedAPIKey(keyRepo, selectedKeyID)
+	}
+
+	// Fall back to user's legacy single key if no key selected
+	if userAPIKey == "" {
+		userRepo := repository.New(repository.GetDB())
+		user, err := userRepo.GetByID(userIDStr.(string))
+		if err == nil && user != nil && user.EncryptedAPIKey != "" {
+			userAPIKey, _ = DecryptAPIKey(user.EncryptedAPIKey)
+		}
 	}
 
 	// Build request to AI service

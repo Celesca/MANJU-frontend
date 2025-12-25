@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { X, Bot, Key, Thermometer, Hash, MessageSquare, FileOutput, Variable } from 'lucide-react';
+import { X, Bot, Key, Thermometer, Hash, MessageSquare, FileOutput, Variable, Plus, Check, Loader2 } from 'lucide-react';
 import type { AIModelData } from '../../../types/workflow';
+import { useAuth } from '../../../hooks/useAuth';
 
 interface AIModelConfigPanelProps {
   data: AIModelData;
@@ -9,23 +10,104 @@ interface AIModelConfigPanelProps {
   onClose: () => void;
 }
 
+interface SavedAPIKey {
+  id: string;
+  label: string;
+  masked_key: string;
+  provider: string;
+  is_default: boolean;
+}
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+
 // Only OpenAI for now - can be extended later
 const providers = [
   { id: 'openai', name: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'] },
 ];
 
 export default function AIModelConfigPanel({ data, onSave, onClose }: AIModelConfigPanelProps) {
+  const { user } = useAuth();
   const [formData, setFormData] = useState<AIModelData>({
     ...data,
     provider: 'openai', // Force OpenAI for now
     expectedOutput: data.expectedOutput || '',
     outputVariable: data.outputVariable || 'ai_response',
+    selectedApiKeyId: data.selectedApiKeyId || '',
   });
+
+  // API Keys state
+  const [savedKeys, setSavedKeys] = useState<SavedAPIKey[]>([]);
+  const [loadingKeys, setLoadingKeys] = useState(true);
+  const [showAddKey, setShowAddKey] = useState(false);
+  const [newKeyLabel, setNewKeyLabel] = useState('');
+  const [newKeyValue, setNewKeyValue] = useState('');
+  const [savingKey, setSavingKey] = useState(false);
 
   const currentProvider = providers.find((p) => p.id === formData.provider);
 
+  // Fetch saved API keys
+  useEffect(() => {
+    const fetchKeys = async () => {
+      if (!user?.id) return;
+      try {
+        const res = await fetch(`${API_BASE}/api/users/${user.id}/api-keys`, {
+          credentials: 'include',
+        });
+        if (res.ok) {
+          const keys = await res.json();
+          setSavedKeys(keys || []);
+
+          // Auto-select default key if none selected
+          if (!formData.selectedApiKeyId && keys.length > 0) {
+            const defaultKey = keys.find((k: SavedAPIKey) => k.is_default) || keys[0];
+            setFormData(prev => ({ ...prev, selectedApiKeyId: defaultKey.id, apiKeyConfigured: true }));
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch API keys:', err);
+      } finally {
+        setLoadingKeys(false);
+      }
+    };
+    fetchKeys();
+  }, [user?.id]);
+
+  const handleAddKey = async () => {
+    if (!newKeyValue.trim() || !user?.id) return;
+
+    setSavingKey(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/users/${user.id}/api-keys`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          label: newKeyLabel.trim() || 'API Key',
+          api_key: newKeyValue.trim(),
+          provider: 'openai',
+        }),
+      });
+
+      if (res.ok) {
+        const newKey = await res.json();
+        setSavedKeys(prev => [newKey, ...prev]);
+        setFormData(prev => ({ ...prev, selectedApiKeyId: newKey.id, apiKeyConfigured: true }));
+        setNewKeyLabel('');
+        setNewKeyValue('');
+        setShowAddKey(false);
+      }
+    } catch (err) {
+      console.error('Failed to save API key:', err);
+    } finally {
+      setSavingKey(false);
+    }
+  };
+
   const handleSave = () => {
-    onSave(formData);
+    onSave({
+      ...formData,
+      apiKeyConfigured: !!formData.selectedApiKeyId || savedKeys.length > 0,
+    });
   };
 
   return (
@@ -77,6 +159,86 @@ export default function AIModelConfigPanel({ data, onSave, onClose }: AIModelCon
               </option>
             ))}
           </select>
+        </div>
+
+        {/* API Key Selection */}
+        <div className="p-3 bg-purple-50 rounded-lg border border-purple-100">
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+            <Key className="w-4 h-4 text-purple-600" />
+            API Key
+          </label>
+
+          {loadingKeys ? (
+            <div className="flex items-center gap-2 text-gray-500 text-sm">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Loading keys...
+            </div>
+          ) : (
+            <>
+              <select
+                value={formData.selectedApiKeyId || ''}
+                onChange={(e) => setFormData({ ...formData, selectedApiKeyId: e.target.value, apiKeyConfigured: !!e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent mb-2"
+              >
+                <option value="">-- Select an API Key --</option>
+                {savedKeys.map((key) => (
+                  <option key={key.id} value={key.id}>
+                    {key.label} ({key.masked_key})
+                  </option>
+                ))}
+              </select>
+
+              {!showAddKey ? (
+                <button
+                  onClick={() => setShowAddKey(true)}
+                  className="flex items-center gap-1 text-sm text-purple-600 hover:text-purple-700"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add new key
+                </button>
+              ) : (
+                <div className="space-y-2 mt-2 p-2 bg-white rounded border border-gray-200">
+                  <input
+                    type="text"
+                    value={newKeyLabel}
+                    onChange={(e) => setNewKeyLabel(e.target.value)}
+                    placeholder="Label (e.g., Work Key)"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-500"
+                  />
+                  <input
+                    type="password"
+                    value={newKeyValue}
+                    onChange={(e) => setNewKeyValue(e.target.value)}
+                    placeholder="sk-..."
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-500 font-mono"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleAddKey}
+                      disabled={savingKey || !newKeyValue.trim()}
+                      className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-sm bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50"
+                    >
+                      {savingKey ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                      Save
+                    </button>
+                    <button
+                      onClick={() => { setShowAddKey(false); setNewKeyLabel(''); setNewKeyValue(''); }}
+                      className="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          <div className="flex items-center gap-2 mt-2">
+            <div className={`w-2.5 h-2.5 rounded-full ${formData.selectedApiKeyId ? 'bg-green-500' : 'bg-red-500'}`} />
+            <span className="text-xs text-gray-600">
+              {formData.selectedApiKeyId ? 'Key selected' : 'No key selected'}
+            </span>
+          </div>
         </div>
 
         {/* System Prompt */}
@@ -168,23 +330,6 @@ export default function AIModelConfigPanel({ data, onSave, onClose }: AIModelCon
             onChange={(e) => setFormData({ ...formData, maxTokens: parseInt(e.target.value) })}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
           />
-        </div>
-
-        {/* API Key Status */}
-        <div>
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
-            <Key className="w-4 h-4" />
-            API Key
-          </label>
-          <div className="flex items-center gap-2">
-            <div className={`w-3 h-3 rounded-full ${formData.apiKeyConfigured ? 'bg-green-500' : 'bg-red-500'}`} />
-            <span className="text-sm text-gray-600">
-              {formData.apiKeyConfigured ? 'Configured' : 'Not configured'}
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-gray-500">
-            API keys are managed in the Settings page.
-          </p>
         </div>
       </div>
 

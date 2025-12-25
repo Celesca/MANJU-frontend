@@ -32,6 +32,7 @@ export interface AIModelData {
   temperature: number;
   maxTokens: number;
   apiKeyConfigured: boolean;
+  selectedApiKeyId?: string; // Selected API key ID from user's saved keys
   expectedOutput?: string; // Expected output format for if-condition matching (e.g., "YES or NO")
   outputVariable?: string; // Variable name to store the output for use in conditions
 }
@@ -88,11 +89,11 @@ export interface IfConditionData {
   field: 'message' | 'response' | string; // 'message' for user input, 'response' for AI output, or variable name
 }
 
-export type NodeData = 
-  | AIModelData 
-  | RAGDocumentData 
-  | GoogleSheetsData 
-  | VoiceInputData 
+export type NodeData =
+  | AIModelData
+  | RAGDocumentData
+  | GoogleSheetsData
+  | VoiceInputData
   | VoiceOutputData
   | TextInputData
   | TextOutputData

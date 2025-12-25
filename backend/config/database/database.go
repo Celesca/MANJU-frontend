@@ -58,8 +58,8 @@ func Connect() {
 		Logger: newLogger,
 	})
 
-	// Auto-migrate core models (User, Session, Project)
-	if err := Database.AutoMigrate(&repository.User{}, &repository.Session{}, &repository.Project{}); err != nil {
+	// Auto-migrate core models (User, Session, Project, UserAPIKey)
+	if err := Database.AutoMigrate(&repository.User{}, &repository.Session{}, &repository.Project{}, &repository.UserAPIKey{}); err != nil {
 		log.Printf("AutoMigrate error: %v", err)
 	}
 
