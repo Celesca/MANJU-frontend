@@ -109,3 +109,60 @@ func DeleteUser(c *fiber.Ctx, repo *repository.UserRepository) error {
 	}
 	return c.SendStatus(http.StatusNoContent)
 }
+
+// SaveAPIKey encrypts and stores a user's API key
+func SaveAPIKey(c *fiber.Ctx, repo *repository.UserRepository) error {
+	id := c.Params("id")
+
+	var body struct {
+		APIKey string `json:"api_key"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid payload"})
+	}
+
+	if body.APIKey == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "api_key is required"})
+	}
+
+	// Encrypt the API key
+	encrypted, err := EncryptAPIKey(body.APIKey)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to encrypt key"})
+	}
+
+	// Update the user's encrypted API key
+	_, err = repo.Update(id, map[string]interface{}{
+		"encrypted_api_key": encrypted,
+	})
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{"message": "API key saved successfully", "masked_key": MaskAPIKey(body.APIKey)})
+}
+
+// GetAPIKey returns a masked version of the user's API key
+func GetAPIKey(c *fiber.Ctx, repo *repository.UserRepository) error {
+	id := c.Params("id")
+
+	user, err := repo.GetByID(id)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	if user == nil {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "not_found"})
+	}
+
+	if user.EncryptedAPIKey == "" {
+		return c.JSON(fiber.Map{"has_key": false, "masked_key": ""})
+	}
+
+	// Decrypt only to mask it
+	decrypted, err := DecryptAPIKey(user.EncryptedAPIKey)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to decrypt key"})
+	}
+
+	return c.JSON(fiber.Map{"has_key": true, "masked_key": MaskAPIKey(decrypted)})
+}

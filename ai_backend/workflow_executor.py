@@ -116,6 +116,9 @@ class WorkflowState(TypedDict):
     
     # Output tracking for conditions
     output_variables: Dict[str, str]
+    
+    # User-provided API key
+    openai_api_key: Optional[str]
 
 
 # =============================================================================
@@ -363,13 +366,16 @@ class NodeProcessors:
         # Frontend uses `outputVariable` (see AIModelConfigPanel.tsx / types). Accept both keys for safety.
         output_variable_name = node_data.get("outputVariable", node_data.get("outputVariableName", ""))
         
+        # Get API key: prefer user-provided key, fall back to environment variable
+        api_key = state.get("openai_api_key") or os.getenv("OPENAI_API_KEY")
+        
         # Create LLM with specific model and temperature
         llm = None
-        if os.getenv("OPENAI_API_KEY"):
+        if api_key:
             llm = ChatOpenAI(
                 model=model_name,
                 temperature=temperature,
-                openai_api_key=os.getenv("OPENAI_API_KEY"),
+                openai_api_key=api_key,
             )
         
         # Build system prompt with expected output format if specified
@@ -996,6 +1002,7 @@ class WorkflowExecutor:
         workflow,
         conversation_history: List[Dict[str, str]],
         session_id: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute a workflow with the given message."""
         
@@ -1023,6 +1030,7 @@ class WorkflowExecutor:
             "nodes_executed": [],
             "model_used": None,
             "output_variables": {},  # Track AI outputs for conditions
+            "openai_api_key": openai_api_key,  # User-provided API key
         }
         
         # Execute the graph

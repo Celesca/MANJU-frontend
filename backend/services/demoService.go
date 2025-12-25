@@ -19,6 +19,7 @@ type DemoChatRequest struct {
 	Workflow            WorkflowConfig           `json:"workflow"`
 	ConversationHistory []map[string]interface{} `json:"conversation_history"`
 	SessionID           string                   `json:"session_id,omitempty"`
+	OpenAIAPIKey        string                   `json:"openai_api_key,omitempty"`
 }
 
 // WorkflowConfig represents the workflow configuration
@@ -110,6 +111,14 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		}
 	}
 
+	// Retrieve user's API key
+	userRepo := repository.New(repository.GetDB())
+	user, err := userRepo.GetByID(userIDStr.(string))
+	var userAPIKey string
+	if err == nil && user != nil && user.EncryptedAPIKey != "" {
+		userAPIKey, _ = DecryptAPIKey(user.EncryptedAPIKey)
+	}
+
 	// Build request to AI service
 	aiRequest := DemoChatRequest{
 		Message: body.Message,
@@ -119,6 +128,7 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		},
 		ConversationHistory: body.ConversationHistory,
 		SessionID:           body.SessionID,
+		OpenAIAPIKey:        userAPIKey,
 	}
 
 	requestBody, err := json.Marshal(aiRequest)

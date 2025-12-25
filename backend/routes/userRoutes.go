@@ -18,4 +18,8 @@ func UserRoutes(app fiber.Router) {
 	router.Get("/:id", ctrl.GetUser)
 	router.Put("/:id", ctrl.UpdateUser)
 	router.Delete("/:id", ctrl.DeleteUser)
+
+	// API Key management
+	router.Put("/:id/api-key", ctrl.SaveAPIKey)
+	router.Get("/:id/api-key", ctrl.GetAPIKey)
 }

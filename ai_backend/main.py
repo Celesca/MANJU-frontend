@@ -105,6 +105,7 @@ class ChatRequest(BaseModel):
     workflow: WorkflowConfig
     conversation_history: List[Dict[str, str]] = Field(default_factory=list)
     session_id: Optional[str] = None
+    openai_api_key: Optional[str] = None  # User-provided API key
 
 
 class ChatResponse(BaseModel):
@@ -179,6 +180,7 @@ async def chat(request: ChatRequest):
             workflow=request.workflow,
             conversation_history=request.conversation_history,
             session_id=request.session_id,
+            openai_api_key=request.openai_api_key,
         )
         
         processing_time = (datetime.now() - start_time).total_seconds() * 1000

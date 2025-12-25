@@ -63,5 +63,8 @@ func Connect() {
 		log.Printf("AutoMigrate error: %v", err)
 	}
 
+	// Set the database reference for the repository package
+	repository.SetDB(Database)
+
 	fmt.Println("Database connected")
 }

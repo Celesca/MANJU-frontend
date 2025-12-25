@@ -20,13 +20,14 @@ const (
 
 // User model
 type User struct {
-	ID        uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	Email     string         `gorm:"unique;not null" json:"email"`
-	Name      string         `gorm:"not null" json:"name"`
-	Info      datatypes.JSON `gorm:"type:jsonb" json:"info"`
-	Status    Status         `json:"status"`
-	CreatedAt time.Time      `gorm:"default:now()" json:"created_at"`
-	UpdatedAt *time.Time     `json:"updated_at"`
+	ID              uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	Email           string         `gorm:"unique;not null" json:"email"`
+	Name            string         `gorm:"not null" json:"name"`
+	Info            datatypes.JSON `gorm:"type:jsonb" json:"info"`
+	Status          Status         `json:"status"`
+	EncryptedAPIKey string         `gorm:"type:text" json:"-"` // Never expose in JSON
+	CreatedAt       time.Time      `gorm:"default:now()" json:"created_at"`
+	UpdatedAt       *time.Time     `json:"updated_at"`
 }
 
 // BeforeCreate hook to ensure UUID for SQLite
@@ -38,6 +39,19 @@ func (u *User) BeforeCreate(tx *gorm.DB) (err error) {
 		u.CreatedAt = time.Now()
 	}
 	return nil
+}
+
+// db holds a reference to the database connection
+var db *gorm.DB
+
+// SetDB sets the database connection for the repository package
+func SetDB(database *gorm.DB) {
+	db = database
+}
+
+// GetDB returns the database connection
+func GetDB() *gorm.DB {
+	return db
 }
 
 // Repository holds DB
