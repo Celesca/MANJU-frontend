@@ -1,11 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Save, Play, Settings, Plus, Trash2,
-  ChevronLeft, Layout, Share2, Download, Upload,
-  Database, Cpu, MessageSquare, ListTree, GitBranch,
-  Terminal, Globe, Mail, FileText, Phone, User,
-  Type, Volume2, Mic, Activity, HardDrive, Loader2, Edit2
+  Save, Play, Settings,
+  ChevronLeft, Loader2, Edit2
 } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';

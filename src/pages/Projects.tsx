@@ -16,7 +16,6 @@ import {
 import Swal from 'sweetalert2';
 import Navbar from '../components/Navbar';
 import { apiFetch } from '../utils/api';
-import { useAuth } from '../hooks/useAuth';
 
 interface Project {
   id: string;
