@@ -78,3 +78,12 @@ func (r *UserAPIKeyRepository) SetDefault(keyID string, userID string) error {
 	// Set new default
 	return r.db.Model(&UserAPIKey{}).Where("id = ? AND user_id = ?", keyID, userID).Update("is_default", true).Error
 }
+
+// GetDefaultByUserID returns the default API key for a user
+func (r *UserAPIKeyRepository) GetDefaultByUserID(userID string) (*UserAPIKey, error) {
+	var key UserAPIKey
+	if err := r.db.Where("user_id = ? AND is_default = ?", userID, true).First(&key).Error; err != nil {
+		return nil, err
+	}
+	return &key, nil
+}

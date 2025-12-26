@@ -125,15 +125,27 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		}
 	}
 
-	// Retrieve API key - prioritize selected key from workflow, fall back to user's default
+	// Retrieve API key - prioritize:
+	// 1. Specifically selected key in the workflow node
+	// 2. User's designated "Default" key in the new system
+	// 3. (Legacy) User's single encrypted_api_key field
 	var userAPIKey string
+	keyRepo := repository.NewUserAPIKeyRepository(repository.GetDB())
+
 	if selectedKeyID != "" {
 		// Use specifically selected key from workflow
-		keyRepo := repository.NewUserAPIKeyRepository(repository.GetDB())
 		userAPIKey, _ = GetDecryptedAPIKey(keyRepo, selectedKeyID)
 	}
 
-	// Fall back to user's legacy single key if no key selected
+	// If no specific key selected or failed to retrieve it, look for the user's default key in the new system
+	if userAPIKey == "" {
+		defaultKey, err := keyRepo.GetDefaultByUserID(userIDStr.(string))
+		if err == nil && defaultKey != nil {
+			userAPIKey, _ = DecryptAPIKey(defaultKey.EncryptedKey)
+		}
+	}
+
+	// Last fallback: user's legacy single key field
 	if userAPIKey == "" {
 		userRepo := repository.New(repository.GetDB())
 		user, err := userRepo.GetByID(userIDStr.(string))
@@ -457,19 +469,33 @@ func GenerateTTS(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid payload"})
 	}
 
-	if body.Text == "" {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "text is required"})
+	// Retrieve API key for TTS
+	var userAPIKey string
+	keyRepo := repository.NewUserAPIKeyRepository(repository.GetDB())
+	defaultKey, err := keyRepo.GetDefaultByUserID(userIDStr.(string))
+	if err == nil && defaultKey != nil {
+		userAPIKey, _ = DecryptAPIKey(defaultKey.EncryptedKey)
+	} else {
+		// Fallback to legacy key
+		userRepo := repository.New(repository.GetDB())
+		user, err := userRepo.GetByID(userIDStr.(string))
+		if err == nil && user != nil && user.EncryptedAPIKey != "" {
+			userAPIKey, _ = DecryptAPIKey(user.EncryptedAPIKey)
+		}
 	}
 
-	// Default values if not provided
-	if body.Voice == "" {
-		body.Voice = "alloy"
-	}
-	if body.Model == "" {
-		body.Model = "tts-1"
+	// Add API key to request
+	type TTSRequestWithKey struct {
+		TTSRequest
+		OpenAIAPIKey string `json:"openai_api_key,omitempty"`
 	}
 
-	requestBody, err := json.Marshal(body)
+	requestWithKey := TTSRequestWithKey{
+		TTSRequest:   body,
+		OpenAIAPIKey: userAPIKey,
+	}
+
+	requestBody, err := json.Marshal(requestWithKey)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to build request"})
 	}

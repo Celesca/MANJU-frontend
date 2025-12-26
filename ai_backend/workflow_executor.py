@@ -366,10 +366,10 @@ class NodeProcessors:
         # Frontend uses `outputVariable` (see AIModelConfigPanel.tsx / types). Accept both keys for safety.
         output_variable_name = node_data.get("outputVariable", node_data.get("outputVariableName", ""))
         
-        # Get API key: prefer user-provided key, fall back to environment variable
-        api_key = state.get("openai_api_key") or os.getenv("OPENAI_API_KEY")
+        # Get API key: STRICTLY use user-provided key. Do NOT fall back to environment variable!
+        api_key = state.get("openai_api_key")
         
-        # Create LLM with specific model and temperature
+        # Create LLM if key is provided
         llm = None
         if api_key:
             llm = ChatOpenAI(
@@ -433,9 +433,9 @@ class NodeProcessors:
                 logger.exception("LLM error")
                 state["response"] = f"Error generating response: {str(e)}"
         else:
-            # Mock response for demo
-            state["response"] = f"[Demo Mode - No OpenAI API Key] Received: {state['user_message']}"
-            state["model_used"] = "mock"
+            # Mock response for demo when no key is provided
+            state["response"] = f"[Demo Mode - No OpenAI API Key configured in Settings] Message received: {state['user_message']}"
+            state["model_used"] = "none (mock)"
             if output_variable_name:
                 state["output_variables"][output_variable_name] = state["response"]
         
@@ -449,8 +449,11 @@ class NodeProcessors:
             state["rag_context"] = "[FAISS not installed] Install faiss-cpu and langchain-community."
             return state
 
-        if not os.getenv("OPENAI_API_KEY"):
-            state["rag_context"] = "[OpenAI API key required for embeddings]"
+        # Get API key: STRICTLY use user-provided key.
+        api_key = state.get("openai_api_key")
+
+        if not api_key:
+            state["rag_context"] = "[OpenAI API key required for embeddings - Configure in Settings]"
             return state
 
         try:
@@ -489,10 +492,10 @@ class NodeProcessors:
             # Get user query
             query = state["user_message"]
 
-            # Initialize OpenAI embeddings
+            # Initialize OpenAI embeddings with user key
             embeddings = OpenAIEmbeddings(
                 model="text-embedding-3-small",
-                openai_api_key=os.getenv("OPENAI_API_KEY")
+                openai_api_key=api_key
             )
 
             # Try to load existing FAISS index. Support multiple possible index layouts
