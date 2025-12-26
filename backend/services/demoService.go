@@ -19,6 +19,7 @@ type DemoChatRequest struct {
 	Workflow            WorkflowConfig           `json:"workflow"`
 	ConversationHistory []map[string]interface{} `json:"conversation_history"`
 	SessionID           string                   `json:"session_id,omitempty"`
+	OpenAIAPIKey        string                   `json:"openai_api_key,omitempty"`
 }
 
 // WorkflowConfig represents the workflow configuration
@@ -98,8 +99,12 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	}
 
 	// Inject userId and projectId into RAG nodes so AI executor can locate FAISS index
+	// Also check for selectedApiKeyId in AI model nodes
+	var selectedKeyID string
 	for i, node := range nodes {
-		if nodeType, ok := node["type"].(string); ok && nodeType == "rag-documents" {
+		nodeType, _ := node["type"].(string)
+
+		if nodeType == "rag-documents" {
 			nodeData, ok := node["data"].(map[string]interface{})
 			if !ok {
 				nodeData = map[string]interface{}{}
@@ -107,6 +112,45 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 			nodeData["userId"] = userIDStr.(string)
 			nodeData["projectId"] = projectID
 			nodes[i]["data"] = nodeData
+		}
+
+		// Check AI model nodes for selected API key
+		if nodeType == "ai-model" {
+			nodeData, ok := node["data"].(map[string]interface{})
+			if ok {
+				if keyID, exists := nodeData["selectedApiKeyId"].(string); exists && keyID != "" {
+					selectedKeyID = keyID
+				}
+			}
+		}
+	}
+
+	// Retrieve API key - prioritize:
+	// 1. Specifically selected key in the workflow node
+	// 2. User's designated "Default" key in the new system
+	// 3. (Legacy) User's single encrypted_api_key field
+	var userAPIKey string
+	keyRepo := repository.NewUserAPIKeyRepository(repository.GetDB())
+
+	if selectedKeyID != "" {
+		// Use specifically selected key from workflow
+		userAPIKey, _ = GetDecryptedAPIKey(keyRepo, selectedKeyID)
+	}
+
+	// If no specific key selected or failed to retrieve it, look for the user's default key in the new system
+	if userAPIKey == "" {
+		defaultKey, err := keyRepo.GetDefaultByUserID(userIDStr.(string))
+		if err == nil && defaultKey != nil {
+			userAPIKey, _ = DecryptAPIKey(defaultKey.EncryptedKey)
+		}
+	}
+
+	// Last fallback: user's legacy single key field
+	if userAPIKey == "" {
+		userRepo := repository.New(repository.GetDB())
+		user, err := userRepo.GetByID(userIDStr.(string))
+		if err == nil && user != nil && user.EncryptedAPIKey != "" {
+			userAPIKey, _ = DecryptAPIKey(user.EncryptedAPIKey)
 		}
 	}
 
@@ -119,6 +163,7 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		},
 		ConversationHistory: body.ConversationHistory,
 		SessionID:           body.SessionID,
+		OpenAIAPIKey:        userAPIKey,
 	}
 
 	requestBody, err := json.Marshal(aiRequest)
@@ -131,7 +176,14 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	log.Printf("[DEBUG] Calling AI service at: %s", aiServiceURL)
 	client := &http.Client{Timeout: 60 * time.Second}
 
-	resp, err := client.Post(aiServiceURL, "application/json", bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest("POST", aiServiceURL, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create request"})
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", os.Getenv("MANJU_API_KEY"))
+
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("[ERROR] AI service call failed: %v", err)
 		// If AI service is not available, return a mock response
@@ -219,7 +271,14 @@ func ValidateWorkflow(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	aiServiceURL := getAIServiceURL() + "/validate"
 	client := &http.Client{Timeout: 10 * time.Second}
 
-	resp, err := client.Post(aiServiceURL, "application/json", bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest("POST", aiServiceURL, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create request"})
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", os.Getenv("MANJU_API_KEY"))
+
+	resp, err := client.Do(req)
 	if err != nil {
 		// If AI service is not available, do basic validation locally
 		nodeTypes := make([]string, 0)
@@ -338,7 +397,14 @@ func GetWorkflowType(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	aiServiceURL := getAIServiceURL() + "/workflow-type"
 	client := &http.Client{Timeout: 10 * time.Second}
 
-	resp, err := client.Post(aiServiceURL, "application/json", bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest("POST", aiServiceURL, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create request"})
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", os.Getenv("MANJU_API_KEY"))
+
+	resp, err := client.Do(req)
 	if err != nil {
 		// If AI service is not available, detect locally
 		nodeTypes := make([]string, 0)
@@ -424,19 +490,33 @@ func GenerateTTS(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid payload"})
 	}
 
-	if body.Text == "" {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "text is required"})
+	// Retrieve API key for TTS
+	var userAPIKey string
+	keyRepo := repository.NewUserAPIKeyRepository(repository.GetDB())
+	defaultKey, err := keyRepo.GetDefaultByUserID(userIDStr.(string))
+	if err == nil && defaultKey != nil {
+		userAPIKey, _ = DecryptAPIKey(defaultKey.EncryptedKey)
+	} else {
+		// Fallback to legacy key
+		userRepo := repository.New(repository.GetDB())
+		user, err := userRepo.GetByID(userIDStr.(string))
+		if err == nil && user != nil && user.EncryptedAPIKey != "" {
+			userAPIKey, _ = DecryptAPIKey(user.EncryptedAPIKey)
+		}
 	}
 
-	// Default values if not provided
-	if body.Voice == "" {
-		body.Voice = "alloy"
-	}
-	if body.Model == "" {
-		body.Model = "tts-1"
+	// Add API key to request
+	type TTSRequestWithKey struct {
+		TTSRequest
+		OpenAIAPIKey string `json:"openai_api_key,omitempty"`
 	}
 
-	requestBody, err := json.Marshal(body)
+	requestWithKey := TTSRequestWithKey{
+		TTSRequest:   body,
+		OpenAIAPIKey: userAPIKey,
+	}
+
+	requestBody, err := json.Marshal(requestWithKey)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to build request"})
 	}
@@ -445,7 +525,14 @@ func GenerateTTS(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	aiServiceURL := getAIServiceURL() + "/tts"
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	resp, err := client.Post(aiServiceURL, "application/json", bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest("POST", aiServiceURL, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create request"})
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", os.Getenv("MANJU_API_KEY"))
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": "AI service unavailable"})
 	}

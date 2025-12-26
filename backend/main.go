@@ -2,7 +2,9 @@ package main
 
 import (
 	"log"
+	"manju/backend/auth"
 	"manju/backend/config/database"
+	mid "manju/backend/middleware"
 	"manju/backend/repository"
 	"os"
 	"strings"
@@ -39,9 +41,12 @@ func main() {
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     frontend,
 		AllowCredentials: true,
-		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, X-API-Key",
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
 	}))
+
+	// API Key Security Layer
+	app.Use(mid.APIKeyGuard())
 
 	// Dev helper: disable auth checks and inject a developer user into context
 	if strings.ToLower(strings.TrimSpace(os.Getenv("DISABLE_AUTH"))) == "true" {
@@ -79,6 +84,12 @@ func main() {
 	routes.AuthRoutes(app)
 
 	api := app.Group("/api")
+
+	// Apply RequireAuth middleware to all /api/* routes (except when DISABLE_AUTH is true)
+	if strings.ToLower(strings.TrimSpace(os.Getenv("DISABLE_AUTH"))) != "true" {
+		api.Use(auth.RequireAuth)
+	}
+
 	api.Get("/docs/*", swagger.HandlerDefault) // default swagger UI
 	api.Get("/health", func(c *fiber.Ctx) error {
 		return c.SendString("OK")

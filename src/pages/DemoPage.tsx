@@ -2,19 +2,12 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  Send,
-  ChevronLeft,
-  Loader2,
-  Bot,
-  User,
-  Settings,
-  Zap,
-  AlertCircle,
-  Mic,
-  Volume2,
-  VolumeX,
-  Square
+  Send, User, Bot, Square,
+  Settings, ChevronLeft,
+  Volume2, Mic, AlertCircle,
+  Loader2, VolumeX, Zap
 } from 'lucide-react';
+import { apiFetch } from '../utils/api';
 import Navbar from '../components/Navbar';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
@@ -104,7 +97,7 @@ export default function DemoPage() {
         setLoading(true);
 
         // Load project info
-        const projectRes = await fetch(`${API_BASE}/api/projects/${projectId}`, {
+        const projectRes = await apiFetch(`${API_BASE}/api/projects/${projectId}`, {
           credentials: 'include',
         });
 
@@ -121,11 +114,11 @@ export default function DemoPage() {
 
         // Validate workflow and get workflow type in parallel
         const [validateRes, workflowTypeRes] = await Promise.all([
-          fetch(`${API_BASE}/api/projects/${projectId}/validate`, {
+          apiFetch(`${API_BASE}/api/projects/${projectId}/validate`, {
             method: 'POST',
             credentials: 'include',
           }),
-          fetch(`${API_BASE}/api/projects/${projectId}/workflow-type`, {
+          apiFetch(`${API_BASE}/api/projects/${projectId}/workflow-type`, {
             credentials: 'include',
           }),
         ]);
@@ -191,7 +184,7 @@ export default function DemoPage() {
 
       // For voice workflows, we could send the audio blob
       // For now, we'll send the transcription
-      const res = await fetch(`${API_BASE}/api/projects/${projectId}/demo`, {
+      const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/demo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -460,7 +453,7 @@ export default function DemoPage() {
         audioRef.current = null;
       }
 
-      const res = await fetch(`${API_BASE}/api/projects/${projectId}/tts`, {
+      const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -523,7 +516,7 @@ export default function DemoPage() {
         content: msg.content,
       }));
 
-      const res = await fetch(`${API_BASE}/api/projects/${projectId}/demo`, {
+      const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/demo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -704,8 +697,8 @@ export default function DemoPage() {
                 <div className={`max-w-[75%] ${message.role === 'user' ? 'order-1' : ''}`}>
                   <div
                     className={`rounded-2xl px-4 py-2.5 ${message.role === 'user'
-                        ? 'bg-purple-600 text-white'
-                        : 'bg-white border border-gray-200 text-gray-800'
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-white border border-gray-200 text-gray-800'
                       }`}
                   >
                     <p className="whitespace-pre-wrap">{message.content}</p>
@@ -809,15 +802,15 @@ export default function DemoPage() {
           {workflowType && (
             <div className="flex items-center justify-center gap-2 mb-3">
               <span className={`px-2 py-0.5 text-xs rounded-full ${workflowType.input_type === 'voice'
-                  ? 'bg-blue-100 text-blue-700'
-                  : 'bg-gray-100 text-gray-600'
+                ? 'bg-blue-100 text-blue-700'
+                : 'bg-gray-100 text-gray-600'
                 }`}>
                 {workflowType.input_type === 'voice' ? '🎤 Voice Input' : '⌨️ Text Input'}
               </span>
               <span className="text-gray-400">→</span>
               <span className={`px-2 py-0.5 text-xs rounded-full ${workflowType.output_type === 'voice'
-                  ? 'bg-green-100 text-green-700'
-                  : 'bg-gray-100 text-gray-600'
+                ? 'bg-green-100 text-green-700'
+                : 'bg-gray-100 text-gray-600'
                 }`}>
                 {workflowType.output_type === 'voice' ? '🔊 Voice Output' : '💬 Text Output'}
               </span>
@@ -832,8 +825,8 @@ export default function DemoPage() {
                   onClick={(isRecognizing || isRecording) ? stopRecording : startRecording}
                   disabled={sending}
                   className={`p-6 rounded-full transition-all ${(isRecognizing || isRecording)
-                      ? 'bg-red-500 hover:bg-red-600 animate-pulse'
-                      : 'bg-purple-600 hover:bg-purple-700'
+                    ? 'bg-red-500 hover:bg-red-600 animate-pulse'
+                    : 'bg-purple-600 hover:bg-purple-700'
                     } text-white disabled:opacity-50 disabled:cursor-not-allowed`}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}

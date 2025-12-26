@@ -7,10 +7,12 @@ import Login from "./pages/Login";
 import ModelConfig from "./pages/ModelConfig";
 import Projects from "./pages/Projects";
 import DemoPage from "./pages/DemoPage";
+import SettingsPage from "./pages/SettingsPage";
 import PrivateRoute from "./components/PrivateRoute";
 import FeaturesSection from "./pages/FeaturesSection";
 import PricingSection from "./pages/Pricing";
 import AboutPage from "./pages/About";
+
 
 
 export default function App() {
@@ -24,7 +26,7 @@ export default function App() {
         <PrivateRoute>
           <VoiceStudio />
         </PrivateRoute>
-    } />
+      } />
       <Route path="/login" element={<Login />} />
       <Route path="/projects" element={
         <PrivateRoute>
@@ -36,6 +38,11 @@ export default function App() {
       <Route path="/demo/:projectId" element={
         <PrivateRoute>
           <DemoPage />
+        </PrivateRoute>
+      } />
+      <Route path="/settings" element={
+        <PrivateRoute>
+          <SettingsPage />
         </PrivateRoute>
       } />
     </Routes>

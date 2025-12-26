@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { X, FileText, Upload, Trash2, File, FileIcon, Loader2, CheckCircle, AlertCircle, RefreshCw, Zap } from 'lucide-react';
 import type { RAGDocumentData, UploadedDocument } from '../../../types/workflow';
+import { apiFetch } from '../../../utils/api';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
@@ -36,13 +37,13 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
 
   const embedDocuments = useCallback(async () => {
     if (!projectId || formData.documents.length === 0) return;
-    
+
     setEmbedding(true);
     setEmbedStatus('idle');
     setEmbedMessage('');
 
     try {
-      const res = await fetch(`${API_BASE}/api/projects/${projectId}/documents/embed`, {
+      const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/documents/embed`, {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -70,7 +71,7 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
   const uploadFile = useCallback(async (file: File): Promise<UploadedDocument | null> => {
     const ext = file.name.split('.').pop()?.toLowerCase() as 'pdf' | 'docx' | 'txt';
     const docId = `doc-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
+
     // Create initial document entry with uploading status
     const newDoc: UploadedDocument = {
       id: docId,
@@ -93,7 +94,7 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
       formDataUpload.append('file', file);
       formDataUpload.append('documentId', docId);
 
-      const res = await fetch(`${API_BASE}/api/projects/${projectId}/documents`, {
+      const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/documents`, {
         method: 'POST',
         credentials: 'include',
         body: formDataUpload,
@@ -108,8 +109,8 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
       // Update document status to processing/ready
       setFormData(prev => ({
         ...prev,
-        documents: prev.documents.map(d => 
-          d.id === docId 
+        documents: prev.documents.map(d =>
+          d.id === docId
             ? { ...d, status: result.status || 'ready', id: result.id || docId }
             : d
         ),
@@ -121,7 +122,7 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
       // Update status to error
       setFormData(prev => ({
         ...prev,
-        documents: prev.documents.map(d => 
+        documents: prev.documents.map(d =>
           d.id === docId ? { ...d, status: 'error' } : d
         ),
       }));
@@ -133,12 +134,12 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
     if (!files || files.length === 0) return;
 
     setUploading(true);
-    
+
     // Upload files one by one
     for (const file of Array.from(files)) {
       await uploadFile(file);
     }
-    
+
     setUploading(false);
   };
 
@@ -160,7 +161,7 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
   const handleRemoveDocument = async (docId: string) => {
     try {
       // Call backend to delete
-      await fetch(`${API_BASE}/api/projects/${projectId}/documents/${docId}`, {
+      await apiFetch(`${API_BASE}/api/projects/${projectId}/documents/${docId}`, {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -207,9 +208,8 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
             Upload Documents
           </label>
           <div
-            className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
-              isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
-            }`}
+            className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
+              }`}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
@@ -246,9 +246,8 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
               {formData.documents.map((doc) => (
                 <div
                   key={doc.id}
-                  className={`flex items-center gap-3 p-3 rounded-lg ${
-                    doc.status === 'error' ? 'bg-red-50' : 'bg-gray-50'
-                  }`}
+                  className={`flex items-center gap-3 p-3 rounded-lg ${doc.status === 'error' ? 'bg-red-50' : 'bg-gray-50'
+                    }`}
                 >
                   {fileTypeIcons[doc.type] || <FileText className="w-8 h-8 text-gray-500" />}
                   <div className="flex-1 min-w-0">
@@ -256,7 +255,7 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
                       {doc.name}
                     </div>
                     <div className="text-xs text-gray-500 flex items-center gap-1">
-                      {formatFileSize(doc.size)} • 
+                      {formatFileSize(doc.size)} •
                       <span className="flex items-center gap-1">
                         {statusIcons[doc.status]}
                         {doc.status}
@@ -290,11 +289,10 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
             <button
               onClick={embedDocuments}
               disabled={embedding}
-              className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg transition-colors ${
-                embedding 
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+              className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg transition-colors ${embedding
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                   : 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700'
-              }`}
+                }`}
             >
               {embedding ? (
                 <>
@@ -308,19 +306,17 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
                 </>
               )}
             </button>
-            
+
             {embedStatus !== 'idle' && (
-              <div className={`flex items-center gap-2 p-3 rounded-lg ${
-                embedStatus === 'success' ? 'bg-green-50' : 'bg-red-50'
-              }`}>
+              <div className={`flex items-center gap-2 p-3 rounded-lg ${embedStatus === 'success' ? 'bg-green-50' : 'bg-red-50'
+                }`}>
                 {embedStatus === 'success' ? (
                   <CheckCircle className="w-5 h-5 text-green-600" />
                 ) : (
                   <AlertCircle className="w-5 h-5 text-red-600" />
                 )}
-                <span className={`text-sm ${
-                  embedStatus === 'success' ? 'text-green-700' : 'text-red-700'
-                }`}>
+                <span className={`text-sm ${embedStatus === 'success' ? 'text-green-700' : 'text-red-700'
+                  }`}>
                   {embedMessage}
                 </span>
               </div>
@@ -331,7 +327,7 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
         {/* Chunking Settings */}
         <div className="pt-4 border-t border-gray-200">
           <h3 className="text-sm font-medium text-gray-700 mb-4">Chunking Settings</h3>
-          
+
           <div className="space-y-4">
             <div>
               <label className="block text-sm text-gray-600 mb-1">

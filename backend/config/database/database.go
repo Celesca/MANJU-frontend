@@ -47,15 +47,24 @@ func Connect() {
 		dbPort = "5432"
 	}
 
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable", dbHost, dbUser, dbPassword, dbName, dbPort)
+	sslMode := os.Getenv("SSL_MODE")
+	if sslMode == "" {
+		sslMode = "disable"
+	}
+
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=%s", dbHost, dbUser, dbPassword, dbName, dbPort, sslMode)
+
 	Database, _ = gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: newLogger,
 	})
 
-	// Auto-migrate core models (User, Session, Project)
-	if err := Database.AutoMigrate(&repository.User{}, &repository.Session{}, &repository.Project{}); err != nil {
+	// Auto-migrate core models (User, Session, Project, UserAPIKey)
+	if err := Database.AutoMigrate(&repository.User{}, &repository.Session{}, &repository.Project{}, &repository.UserAPIKey{}); err != nil {
 		log.Printf("AutoMigrate error: %v", err)
 	}
+
+	// Set the database reference for the repository package
+	repository.SetDB(Database)
 
 	fmt.Println("Database connected")
 }

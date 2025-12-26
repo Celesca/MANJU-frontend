@@ -116,6 +116,9 @@ class WorkflowState(TypedDict):
     
     # Output tracking for conditions
     output_variables: Dict[str, str]
+    
+    # User-provided API key
+    openai_api_key: Optional[str]
 
 
 # =============================================================================
@@ -363,13 +366,16 @@ class NodeProcessors:
         # Frontend uses `outputVariable` (see AIModelConfigPanel.tsx / types). Accept both keys for safety.
         output_variable_name = node_data.get("outputVariable", node_data.get("outputVariableName", ""))
         
-        # Create LLM with specific model and temperature
+        # Get API key: STRICTLY use user-provided key. Do NOT fall back to environment variable!
+        api_key = state.get("openai_api_key")
+        
+        # Create LLM if key is provided
         llm = None
-        if os.getenv("OPENAI_API_KEY"):
+        if api_key:
             llm = ChatOpenAI(
                 model=model_name,
                 temperature=temperature,
-                openai_api_key=os.getenv("OPENAI_API_KEY"),
+                openai_api_key=api_key,
             )
         
         # Build system prompt with expected output format if specified
@@ -427,9 +433,9 @@ class NodeProcessors:
                 logger.exception("LLM error")
                 state["response"] = f"Error generating response: {str(e)}"
         else:
-            # Mock response for demo
-            state["response"] = f"[Demo Mode - No OpenAI API Key] Received: {state['user_message']}"
-            state["model_used"] = "mock"
+            # Mock response for demo when no key is provided
+            state["response"] = f"[Demo Mode - No OpenAI API Key configured in Settings] Message received: {state['user_message']}"
+            state["model_used"] = "none (mock)"
             if output_variable_name:
                 state["output_variables"][output_variable_name] = state["response"]
         
@@ -443,8 +449,11 @@ class NodeProcessors:
             state["rag_context"] = "[FAISS not installed] Install faiss-cpu and langchain-community."
             return state
 
-        if not os.getenv("OPENAI_API_KEY"):
-            state["rag_context"] = "[OpenAI API key required for embeddings]"
+        # Get API key: STRICTLY use user-provided key.
+        api_key = state.get("openai_api_key")
+
+        if not api_key:
+            state["rag_context"] = "[OpenAI API key required for embeddings - Configure in Settings]"
             return state
 
         try:
@@ -483,10 +492,10 @@ class NodeProcessors:
             # Get user query
             query = state["user_message"]
 
-            # Initialize OpenAI embeddings
+            # Initialize OpenAI embeddings with user key
             embeddings = OpenAIEmbeddings(
                 model="text-embedding-3-small",
-                openai_api_key=os.getenv("OPENAI_API_KEY")
+                openai_api_key=api_key
             )
 
             # Try to load existing FAISS index. Support multiple possible index layouts
@@ -996,6 +1005,7 @@ class WorkflowExecutor:
         workflow,
         conversation_history: List[Dict[str, str]],
         session_id: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute a workflow with the given message."""
         
@@ -1023,6 +1033,7 @@ class WorkflowExecutor:
             "nodes_executed": [],
             "model_used": None,
             "output_variables": {},  # Track AI outputs for conditions
+            "openai_api_key": openai_api_key,  # User-provided API key
         }
         
         # Execute the graph

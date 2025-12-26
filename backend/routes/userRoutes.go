@@ -18,4 +18,15 @@ func UserRoutes(app fiber.Router) {
 	router.Get("/:id", ctrl.GetUser)
 	router.Put("/:id", ctrl.UpdateUser)
 	router.Delete("/:id", ctrl.DeleteUser)
+
+	// Single API Key management (legacy)
+	router.Put("/:id/api-key", ctrl.SaveAPIKey)
+	router.Get("/:id/api-key", ctrl.GetAPIKey)
+
+	// Multiple API Keys management
+	apiKeyCtrl := controllers.NewAPIKeyController()
+	router.Get("/:id/api-keys", apiKeyCtrl.ListAPIKeys)
+	router.Post("/:id/api-keys", apiKeyCtrl.AddAPIKey)
+	router.Delete("/:id/api-keys/:keyId", apiKeyCtrl.DeleteAPIKey)
+	router.Put("/:id/api-keys/:keyId/default", apiKeyCtrl.SetDefaultAPIKey)
 }

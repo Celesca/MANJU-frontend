@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -43,10 +43,21 @@ async def lifespan(app: FastAPI):
     if api_key:
         openai_client = OpenAI(api_key=api_key)
     else:
-        logger.warning("OPENAI_API_KEY not found. TTS will not be available.")
+        logger.info("OPENAI_API_KEY not found in environment. Users will need to provide their own keys for TTS.")
         
     yield
     logger.info("Shutting down AI Workflow Service...")
+
+
+async def verify_api_key(x_api_key: Optional[str] = Header(None)):
+    """Middleware to verify the X-API-Key header."""
+    expected_key = os.getenv("MANJU_API_KEY")
+    if not expected_key:
+        return # If not set, allow all (safety for initial setup)
+    
+    if x_api_key != expected_key:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing API Key")
+    return x_api_key
 
 
 app = FastAPI(
@@ -54,6 +65,7 @@ app = FastAPI(
     description="LangGraph-based workflow execution service for voice chatbot workflows",
     version="1.0.0",
     lifespan=lifespan,
+    dependencies=[Depends(verify_api_key)],
 )
 
 # CORS middleware for frontend access
@@ -105,6 +117,7 @@ class ChatRequest(BaseModel):
     workflow: WorkflowConfig
     conversation_history: List[Dict[str, str]] = Field(default_factory=list)
     session_id: Optional[str] = None
+    openai_api_key: Optional[str] = None  # User-provided API key
 
 
 class ChatResponse(BaseModel):
@@ -136,6 +149,7 @@ class TTSRequest(BaseModel):
     text: str
     voice: str = "alloy"
     model: str = "tts-1"
+    openai_api_key: Optional[str] = None  # User-provided API key
 
 
 # =============================================================================
@@ -179,6 +193,7 @@ async def chat(request: ChatRequest):
             workflow=request.workflow,
             conversation_history=request.conversation_history,
             session_id=request.session_id,
+            openai_api_key=request.openai_api_key,
         )
         
         processing_time = (datetime.now() - start_time).total_seconds() * 1000
@@ -237,21 +252,25 @@ async def text_to_speech(request: TTSRequest):
     Convert text to speech using OpenAI TTS.
     Returns an MP3 audio stream.
     """
-    if openai_client is None:
-        raise HTTPException(status_code=503, detail="OpenAI client not initialized (check API key)")
+    # Use request-provided key or server-wide key if available
+    api_key = request.openai_api_key or os.getenv("OPENAI_API_KEY")
     
-    if not request.text:
-        raise HTTPException(status_code=400, detail="Text is required")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="OpenAI API key is required. Configure it in Settings.")
 
     try:
-        response = openai_client.audio.speech.create(
+        # Create a temporary client if using a request-specific key
+        # or use the global client if it exists and matches
+        client = openai_client
+        if request.openai_api_key or not client:
+            client = OpenAI(api_key=api_key)
+
+        response = client.audio.speech.create(
             model=request.model,
             voice=request.voice,
             input=request.text,
         )
         
-        # We can use the response object directly as a generator for StreamingResponse
-        # or call response.iter_bytes()
         return StreamingResponse(response.iter_bytes(), media_type="audio/mpeg")
         
     except Exception as e:

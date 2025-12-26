@@ -34,3 +34,11 @@ func (uc *UserController) UpdateUser(c *fiber.Ctx) error {
 func (uc *UserController) DeleteUser(c *fiber.Ctx) error {
 	return services.DeleteUser(c, uc.repo)
 }
+
+func (uc *UserController) SaveAPIKey(c *fiber.Ctx) error {
+	return services.SaveAPIKey(c, uc.repo)
+}
+
+func (uc *UserController) GetAPIKey(c *fiber.Ctx) error {
+	return services.GetAPIKey(c, uc.repo)
+}
