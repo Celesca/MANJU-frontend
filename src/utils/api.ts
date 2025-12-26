@@ -4,17 +4,40 @@
  */
 
 export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
+    console.log('[apiFetch] Called with URL:', url);
     const MANJU_API_KEY = import.meta.env.VITE_MANJU_API_KEY || '';
-    const headers = new Headers(options.headers || {});
+    console.log('[apiFetch] MANJU_API_KEY:', MANJU_API_KEY);
 
+    // Build headers object - start with existing headers from options
+    const headers: Record<string, string> = {};
+
+    // Copy existing headers if any
+    if (options.headers) {
+        if (options.headers instanceof Headers) {
+            options.headers.forEach((value, key) => {
+                headers[key] = value;
+            });
+        } else if (Array.isArray(options.headers)) {
+            options.headers.forEach(([key, value]) => {
+                headers[key] = value;
+            });
+        } else {
+            Object.assign(headers, options.headers);
+        }
+    }
+
+    // Add API Key
     if (MANJU_API_KEY) {
-        headers.set('X-API-Key', MANJU_API_KEY);
+        headers['X-API-Key'] = MANJU_API_KEY;
+        console.log('[apiFetch] Added X-API-Key to headers');
     }
 
     // Ensure Content-Type is set for JSON requests if not already set
-    if (options.body && !headers.has('Content-Type') && typeof options.body === 'string') {
-        headers.set('Content-Type', 'application/json');
+    if (options.body && !headers['Content-Type'] && typeof options.body === 'string') {
+        headers['Content-Type'] = 'application/json';
     }
+
+    console.log('[apiFetch] Final headers:', JSON.stringify(headers));
 
     return fetch(url, {
         ...options,
