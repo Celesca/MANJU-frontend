@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"manju/backend/config/database"
+	mid "manju/backend/middleware"
 	"manju/backend/repository"
 	"os"
 	"strings"
@@ -42,6 +43,9 @@ func main() {
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
 	}))
+
+	// API Key Security Layer
+	app.Use(mid.APIKeyGuard())
 
 	// Dev helper: disable auth checks and inject a developer user into context
 	if strings.ToLower(strings.TrimSpace(os.Getenv("DISABLE_AUTH"))) == "true" {

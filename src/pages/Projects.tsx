@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Plus, 
-  FolderOpen, 
-  Settings, 
-  Trash2, 
-  Play, 
-  Clock, 
+import {
+  Plus,
+  FolderOpen,
+  Settings,
+  Trash2,
+  Play,
+  Clock,
   Search,
   MoreVertical,
   ChevronLeft,
@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import Navbar from '../components/Navbar';
+import { apiFetch } from '../utils/api';
+import { useAuth } from '../hooks/useAuth';
 
 interface Project {
   id: string;
@@ -47,7 +49,7 @@ export default function Projects() {
     const loadProjects = async () => {
       try {
         setLoading(true);
-        const res = await fetch(`${API_BASE}/api/projects`, {
+        const res = await apiFetch(`${API_BASE}/api/projects`, {
           credentials: 'include',
         });
         if (!res.ok) {
@@ -84,10 +86,10 @@ export default function Projects() {
 
   const createProject = async () => {
     if (!newProjectName.trim()) return;
-    
+
     try {
       setCreating(true);
-      const res = await fetch(`${API_BASE}/api/projects`, {
+      const res = await apiFetch(`${API_BASE}/api/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -98,17 +100,17 @@ export default function Projects() {
           connections: [],
         }),
       });
-      
+
       if (!res.ok) {
         throw new Error('Failed to create project');
       }
-      
+
       const newProject = await res.json();
       setProjects((prev) => [newProject, ...prev]);
       setShowCreateModal(false);
       setNewProjectName('');
       setNewProjectDescription('');
-      
+
       // Navigate to the new project
       navigate(`/model-config/${newProject.id}`);
     } catch (err) {
@@ -120,17 +122,17 @@ export default function Projects() {
 
   const deleteProject = async (id: string) => {
     if (!confirm('Are you sure you want to delete this project?')) return;
-    
+
     try {
-      const res = await fetch(`${API_BASE}/api/projects/${id}`, {
+      const res = await apiFetch(`${API_BASE}/api/projects/${id}`, {
         method: 'DELETE',
         credentials: 'include',
       });
-      
+
       if (!res.ok) {
         throw new Error('Failed to delete project');
       }
-      
+
       setProjects((prev) => prev.filter((p) => p.id !== id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete project');
@@ -152,7 +154,7 @@ export default function Projects() {
     if (!editingName.trim()) return;
     try {
       setSavingEdit(true);
-      const res = await fetch(`${API_BASE}/api/projects/${projectId}`, {
+      const res = await apiFetch(`${API_BASE}/api/projects/${projectId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -229,7 +231,7 @@ export default function Projects() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50">
       <Navbar />
-      
+
       <main className="max-w-7xl mx-auto px-6 pt-24 pb-12">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
@@ -242,7 +244,7 @@ export default function Projects() {
             </div>
             <p className="text-gray-600">Manage your voice workflow projects</p>
           </div>
-          
+
           <motion.button
             onClick={() => setShowCreateModal(true)}
             className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 text-white rounded-lg font-semibold shadow-lg shadow-purple-200 hover:bg-purple-700 transition-colors"
@@ -270,7 +272,7 @@ export default function Projects() {
         {error && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
             {error}
-            <button 
+            <button
               onClick={() => setError(null)}
               className="ml-2 underline hover:no-underline"
             >
@@ -294,8 +296,8 @@ export default function Projects() {
               {searchQuery ? 'No projects found' : 'No projects yet'}
             </h3>
             <p className="text-gray-500 mb-6">
-              {searchQuery 
-                ? 'Try a different search term' 
+              {searchQuery
+                ? 'Try a different search term'
                 : 'Create your first voice workflow project to get started'}
             </p>
             {!searchQuery && (
@@ -358,7 +360,7 @@ export default function Projects() {
                       >
                         <MoreVertical className="w-5 h-5 text-gray-400" />
                       </button>
-                      
+
                       <AnimatePresence>
                         {menuOpenId === project.id && (
                           <motion.div
@@ -393,7 +395,7 @@ export default function Projects() {
                       </AnimatePresence>
                     </div>
                   </div>
-                  
+
                   <div className="flex items-center gap-3 mb-4">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(project.status)}`}>
                       {project.status}
@@ -404,7 +406,7 @@ export default function Projects() {
                     </span>
                   </div>
                 </div>
-                
+
                 <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex gap-2">
                   {editingId === project.id ? (
                     <div className="flex-1 flex items-center justify-center gap-2 px-4 py-2">
@@ -462,7 +464,7 @@ export default function Projects() {
               onClick={(e) => e.stopPropagation()}
             >
               <h2 className="text-xl font-bold text-gray-900 mb-4">Create New Project</h2>
-              
+
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -477,7 +479,7 @@ export default function Projects() {
                     autoFocus
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Description
@@ -491,7 +493,7 @@ export default function Projects() {
                   />
                 </div>
               </div>
-              
+
               <div className="flex gap-3 mt-6">
                 <button
                   onClick={() => setShowCreateModal(false)}

@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -49,11 +49,23 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down AI Workflow Service...")
 
 
+async def verify_api_key(x_api_key: Optional[str] = Header(None)):
+    """Middleware to verify the X-API-Key header."""
+    expected_key = os.getenv("MANJU_API_KEY")
+    if not expected_key:
+        return # If not set, allow all (safety for initial setup)
+    
+    if x_api_key != expected_key:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing API Key")
+    return x_api_key
+
+
 app = FastAPI(
     title="MANJU AI Workflow Service",
     description="LangGraph-based workflow execution service for voice chatbot workflows",
     version="1.0.0",
     lifespan=lifespan,
+    dependencies=[Depends(verify_api_key)],
 )
 
 # CORS middleware for frontend access

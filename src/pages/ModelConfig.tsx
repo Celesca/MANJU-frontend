@@ -1,9 +1,16 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Save, Play, Settings, ChevronLeft, Loader2, Edit2 } from 'lucide-react';
+import {
+  Save, Play, Settings, Plus, Trash2,
+  ChevronLeft, Layout, Share2, Download, Upload,
+  Database, Cpu, MessageSquare, ListTree, GitBranch,
+  Terminal, Globe, Mail, FileText, Phone, User,
+  Type, Volume2, Mic, Activity, HardDrive, Loader2, Edit2
+} from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import { useAuth } from '../hooks/useAuth';
+import { apiFetch } from '../utils/api';
 import NodeSidebar from '../components/workflow/NodeSidebar';
 import WorkflowCanvas from '../components/workflow/WorkflowCanvas';
 import {
@@ -31,7 +38,7 @@ export default function ModelConfig() {
   const navigate = useNavigate();
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const { user } = useAuth();
-  
+
   // Workflow state
   const [nodes, setNodes] = useState<WorkflowNode[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
@@ -39,7 +46,7 @@ export default function ModelConfig() {
   const [configPanelNode, setConfigPanelNode] = useState<WorkflowNode | null>(null);
   const [workflowName, setWorkflowName] = useState('Untitled Workflow');
   const [workflowDescription, setWorkflowDescription] = useState('');
-  
+
   // Loading / saving state
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -50,7 +57,7 @@ export default function ModelConfig() {
     const loadProjectData = async (id: string) => {
       try {
         setLoading(true);
-        const res = await fetch(`${API_BASE}/api/projects/${id}`, {
+        const res = await apiFetch(`${API_BASE}/api/projects/${id}`, {
           credentials: 'include',
         });
         if (!res.ok) {
@@ -92,7 +99,7 @@ export default function ModelConfig() {
   // Handle drop on canvas
   const handleDrop = useCallback((template: NodeTemplate, position: Position) => {
     const newNode: WorkflowNode = {
-      id: `node-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `node - ${Date.now()} -${Math.random().toString(36).substr(2, 9)} `,
       type: template.type,
       position,
       data: template.defaultData,
@@ -147,7 +154,7 @@ export default function ModelConfig() {
     (connection: Omit<Connection, 'id'>) => {
       const newConnection: Connection = {
         ...connection,
-        id: `conn-${Date.now()}`,
+        id: `conn - ${Date.now()} `,
       };
       setConnections((prev) => [...prev, newConnection]);
       setHasUnsavedChanges(true);
@@ -187,7 +194,7 @@ export default function ModelConfig() {
           return n;
         });
 
-        const res = await fetch(`${API_BASE}/api/projects/${projectId}`, {
+        const res = await apiFetch(`${API_BASE}/api/projects/${projectId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -203,7 +210,7 @@ export default function ModelConfig() {
         await Swal.fire({ icon: 'success', title: 'Saved', text: 'Project saved.' });
       } else {
         // Create new project
-        const res = await fetch(`${API_BASE}/api/projects`, {
+        const res = await apiFetch(`${API_BASE}/api/projects`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -217,7 +224,7 @@ export default function ModelConfig() {
         if (!res.ok) throw new Error('Failed to create');
         const newProject = await res.json();
         setHasUnsavedChanges(false);
-        navigate(`/model-config/${newProject.id}`, { replace: true });
+        navigate(`/ model - config / ${newProject.id} `, { replace: true });
         await Swal.fire({ icon: 'success', title: 'Created', text: 'Project created.' });
       }
     } catch (err) {
@@ -289,11 +296,11 @@ export default function ModelConfig() {
       if (result.isConfirmed) {
         await handleSaveWorkflow();
         if (projectId) {
-          navigate(`/demo/${projectId}`);
+          navigate(`/ demo / ${projectId} `);
         }
       } else if (result.isDenied) {
         if (projectId) {
-          navigate(`/demo/${projectId}`);
+          navigate(`/ demo / ${projectId} `);
         } else {
           await Swal.fire({
             icon: 'info',
@@ -304,7 +311,7 @@ export default function ModelConfig() {
       }
     } else {
       if (projectId) {
-        navigate(`/demo/${projectId}`);
+        navigate(`/ demo / ${projectId} `);
       } else {
         await Swal.fire({
           icon: 'info',

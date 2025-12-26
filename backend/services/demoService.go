@@ -176,7 +176,14 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	log.Printf("[DEBUG] Calling AI service at: %s", aiServiceURL)
 	client := &http.Client{Timeout: 60 * time.Second}
 
-	resp, err := client.Post(aiServiceURL, "application/json", bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest("POST", aiServiceURL, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create request"})
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", os.Getenv("MANJU_API_KEY"))
+
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("[ERROR] AI service call failed: %v", err)
 		// If AI service is not available, return a mock response
@@ -264,7 +271,14 @@ func ValidateWorkflow(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	aiServiceURL := getAIServiceURL() + "/validate"
 	client := &http.Client{Timeout: 10 * time.Second}
 
-	resp, err := client.Post(aiServiceURL, "application/json", bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest("POST", aiServiceURL, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create request"})
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", os.Getenv("MANJU_API_KEY"))
+
+	resp, err := client.Do(req)
 	if err != nil {
 		// If AI service is not available, do basic validation locally
 		nodeTypes := make([]string, 0)
@@ -383,7 +397,14 @@ func GetWorkflowType(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	aiServiceURL := getAIServiceURL() + "/workflow-type"
 	client := &http.Client{Timeout: 10 * time.Second}
 
-	resp, err := client.Post(aiServiceURL, "application/json", bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest("POST", aiServiceURL, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create request"})
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", os.Getenv("MANJU_API_KEY"))
+
+	resp, err := client.Do(req)
 	if err != nil {
 		// If AI service is not available, detect locally
 		nodeTypes := make([]string, 0)
@@ -504,7 +525,14 @@ func GenerateTTS(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	aiServiceURL := getAIServiceURL() + "/tts"
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	resp, err := client.Post(aiServiceURL, "application/json", bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest("POST", aiServiceURL, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create request"})
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", os.Getenv("MANJU_API_KEY"))
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": "AI service unavailable"})
 	}

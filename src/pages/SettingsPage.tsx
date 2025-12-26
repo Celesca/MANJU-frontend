@@ -1,9 +1,13 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Key, Save, Eye, EyeOff, Loader2, ChevronLeft, Shield, CheckCircle, Trash2 } from 'lucide-react';
+import {
+    Key, Save, Eye, EyeOff, Loader2, ChevronLeft,
+    Shield, CheckCircle, Trash2, Plus, Check, Info
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import { useAuth } from '../hooks/useAuth';
+import { apiFetch } from '../utils/api';
 import Navbar from '../components/Navbar';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
@@ -33,7 +37,7 @@ export default function SettingsPage() {
             if (!user?.id) return;
 
             try {
-                const res = await fetch(`${API_BASE}/api/users/${user.id}/api-keys`, {
+                const res = await apiFetch(`${API_BASE}/api/users/${user.id}/api-keys`, {
                     credentials: 'include',
                 });
                 if (res.ok) {
@@ -123,7 +127,7 @@ export default function SettingsPage() {
 
     const handleSetDefault = async (keyId: string) => {
         try {
-            const res = await fetch(`${API_BASE}/api/users/${user?.id}/api-keys/${keyId}/default`, {
+            const res = await apiFetch(`${API_BASE}/api/users/${user?.id}/api-keys/${keyId}/default`, {
                 method: 'PUT',
                 credentials: 'include',
             });
@@ -198,8 +202,8 @@ export default function SettingsPage() {
                                             <div
                                                 key={key.id}
                                                 className={`flex items-center justify-between p-3 rounded-lg border ${key.is_default
-                                                        ? 'bg-green-500/10 border-green-500/30'
-                                                        : 'bg-white/5 border-white/10'
+                                                    ? 'bg-green-500/10 border-green-500/30'
+                                                    : 'bg-white/5 border-white/10'
                                                     }`}
                                             >
                                                 <div className="flex items-center gap-3">
