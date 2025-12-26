@@ -10,20 +10,29 @@ ACR_NAME="manjuuniverseacr"
 ACA_ENV_NAME="manju-env"
 BACKEND_APP_NAME="manju-backend"
 AI_BACKEND_APP_NAME="manju-ai-backend"
+FRONTEND_APP_NAME="manju-frontend"
 
 # Flags for selective deployment
 DEPLOY_BACKEND=true
 DEPLOY_AI_BACKEND=true
+DEPLOY_FRONTEND=true
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         --backend-only)
             DEPLOY_AI_BACKEND=false
+            DEPLOY_FRONTEND=false
             shift
             ;;
         --ai-only)
             DEPLOY_BACKEND=false
+            DEPLOY_FRONTEND=false
+            shift
+            ;;
+        --frontend-only)
+            DEPLOY_BACKEND=false
+            DEPLOY_AI_BACKEND=false
             shift
             ;;
         --help)
@@ -32,6 +41,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --backend-only    Deploy only the backend service"
             echo "  --ai-only         Deploy only the AI backend service"
+            echo "  --frontend-only   Deploy only the frontend service"
             echo "  --help            Show this help message"
             echo ""
             echo "By default, both services are deployed."
@@ -52,6 +62,7 @@ echo "Resource Group: $RESOURCE_GROUP"
 echo "ACR Name: $ACR_NAME"
 echo "Deploy Backend: $DEPLOY_BACKEND"
 echo "Deploy AI Backend: $DEPLOY_AI_BACKEND"
+echo "Deploy Frontend: $DEPLOY_FRONTEND"
 echo "=============================================="
 
 # Verify Azure login
@@ -135,6 +146,78 @@ if [ "$DEPLOY_BACKEND" = true ]; then
     echo "Backend updated successfully!"
 fi
 
+# Build and Deploy Frontend
+if [ "$DEPLOY_FRONTEND" = true ]; then
+    echo ""
+    echo "----------------------------------------------"
+    echo "Building Frontend..."
+    echo "----------------------------------------------"
+    
+    # Get Backend URL to set VITE_API_URL
+    echo "Fetching Backend URL for frontend build..."
+    BACKEND_URL=$(az containerapp show --name $BACKEND_APP_NAME --resource-group $RESOURCE_GROUP --query properties.configuration.ingress.fqdn --output tsv)
+    
+    if [ -z "$BACKEND_URL" ]; then
+        echo "Warning: Could not find Backend URL. Using fallback: http://localhost:8080"
+        API_URL="http://localhost:8080"
+    else
+        API_URL="https://$BACKEND_URL"
+    fi
+    
+    echo "Setting VITE_API_URL to: $API_URL"
+
+    az acr build --registry $ACR_NAME \
+      --image $FRONTEND_APP_NAME:latest \
+      --image $FRONTEND_APP_NAME:$TIMESTAMP \
+      --build-arg VITE_API_URL=$API_URL \
+      .
+    
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to build Frontend image."
+        exit 1
+    fi
+    
+    echo ""
+    echo "Updating Frontend Container App..."
+    az containerapp update \
+      --name $FRONTEND_APP_NAME \
+      --resource-group $RESOURCE_GROUP \
+      --image $ACR_LOGIN_SERVER/$FRONTEND_APP_NAME:$TIMESTAMP
+    
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to update Frontend Container App."
+        exit 1
+    fi
+    
+    echo "Frontend updated successfully!"
+fi
+
+# Synchronize Backend configuration
+if [ "$DEPLOY_BACKEND" = true ] || [ "$DEPLOY_FRONTEND" = true ]; then
+    echo ""
+    echo "----------------------------------------------"
+    echo "Synchronizing Backend Configuration..."
+    echo "----------------------------------------------"
+    
+    BACKEND_URL=$(az containerapp show --name $BACKEND_APP_NAME --resource-group $RESOURCE_GROUP --query properties.configuration.ingress.fqdn --output tsv)
+    FRONTEND_URL=$(az containerapp show --name $FRONTEND_APP_NAME --resource-group $RESOURCE_GROUP --query properties.configuration.ingress.fqdn --output tsv)
+    
+    if [ ! -z "$FRONTEND_URL" ] && [ ! -z "$BACKEND_URL" ]; then
+        az containerapp update \
+          --name $BACKEND_APP_NAME \
+          --resource-group $RESOURCE_GROUP \
+          --set-env-vars \
+            FRONTEND_URL=https://$FRONTEND_URL \
+            REDIRECT_URI=https://$BACKEND_URL/auth/callback/google
+        
+        echo "Backend synchronized with:"
+        echo "  FRONTEND_URL: https://$FRONTEND_URL"
+        echo "  REDIRECT_URI: https://$BACKEND_URL/auth/callback/google"
+    else
+        echo "Warning: Skipping sync - could not resolve URLs."
+    fi
+fi
+
 # Get deployment URLs
 echo ""
 echo "=============================================="
@@ -149,6 +232,11 @@ fi
 if [ "$DEPLOY_AI_BACKEND" = true ]; then
     AI_BACKEND_URL=$(az containerapp show --name $AI_BACKEND_APP_NAME --resource-group $RESOURCE_GROUP --query properties.configuration.ingress.fqdn --output tsv)
     echo "AI Backend URL: https://$AI_BACKEND_URL"
+fi
+
+if [ "$DEPLOY_FRONTEND" = true ]; then
+    FRONTEND_URL=$(az containerapp show --name $FRONTEND_APP_NAME --resource-group $RESOURCE_GROUP --query properties.configuration.ingress.fqdn --output tsv)
+    echo "Frontend URL: https://$FRONTEND_URL"
 fi
 
 echo ""

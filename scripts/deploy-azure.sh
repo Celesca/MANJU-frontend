@@ -110,6 +110,8 @@ az containerapp create \
     DB_PASSWORD=$DB_PASSWORD \
     DB_NAME=$DB_NAME \
     SSL_MODE=require \
+    CLIENT_ID="YOUR_GOOGLE_CLIENT_ID" \
+    CLIENT_SECRET="YOUR_GOOGLE_CLIENT_SECRET" \
   --min-replicas 1 \
   --max-replicas 3
 
