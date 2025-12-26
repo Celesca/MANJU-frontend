@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { X, Bot, Key, Thermometer, Hash, MessageSquare, FileOutput, Variable, Plus, Check, Loader2 } from 'lucide-react';
 import type { AIModelData } from '../../../types/workflow';
 import { useAuth } from '../../../hooks/useAuth';
+import { apiFetch } from '../../../utils/api';
 
 interface AIModelConfigPanelProps {
   data: AIModelData;
@@ -50,7 +51,7 @@ export default function AIModelConfigPanel({ data, onSave, onClose }: AIModelCon
     const fetchKeys = async () => {
       if (!user?.id) return;
       try {
-        const res = await fetch(`${API_BASE}/api/users/${user.id}/api-keys`, {
+        const res = await apiFetch(`${API_BASE}/api/users/${user.id}/api-keys`, {
           credentials: 'include',
         });
         if (res.ok) {
@@ -77,7 +78,7 @@ export default function AIModelConfigPanel({ data, onSave, onClose }: AIModelCon
 
     setSavingKey(true);
     try {
-      const res = await fetch(`${API_BASE}/api/users/${user.id}/api-keys`, {
+      const res = await apiFetch(`${API_BASE}/api/users/${user.id}/api-keys`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

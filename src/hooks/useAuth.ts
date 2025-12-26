@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiFetch } from '../utils/api';
 
 type User = { id: string; email: string; name?: string } | null;
 
@@ -12,7 +13,7 @@ export function useAuth() {
       try {
         const API_BASE = (import.meta.env.VITE_API_URL as string) || '';
         const url = API_BASE ? `${API_BASE}/auth/me` : '/auth/me';
-        const res = await fetch(url, { credentials: 'include' });
+        const res = await apiFetch(url, { credentials: 'include' });
         if (!mounted) return;
         if (!res.ok) {
           setUser(null);

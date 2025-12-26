@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
     Key, Save, Eye, EyeOff, Loader2, ChevronLeft,
-    Shield, CheckCircle, Trash2, Plus, Check, Info
+    Shield, CheckCircle, Trash2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
@@ -69,7 +69,7 @@ export default function SettingsPage() {
 
         setSaving(true);
         try {
-            const res = await fetch(`${API_BASE}/api/users/${user?.id}/api-keys`, {
+            const res = await apiFetch(`${API_BASE}/api/users/${user?.id}/api-keys`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
@@ -111,7 +111,7 @@ export default function SettingsPage() {
         if (!result.isConfirmed) return;
 
         try {
-            const res = await fetch(`${API_BASE}/api/users/${user?.id}/api-keys/${keyId}`, {
+            const res = await apiFetch(`${API_BASE}/api/users/${user?.id}/api-keys/${keyId}`, {
                 method: 'DELETE',
                 credentials: 'include',
             });

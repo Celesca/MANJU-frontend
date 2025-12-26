@@ -3,9 +3,8 @@
  * Automatically adds the X-API-Key header to all requests.
  */
 
-const MANJU_API_KEY = import.meta.env.VITE_MANJU_API_KEY || '';
-
 export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
+    const MANJU_API_KEY = import.meta.env.VITE_MANJU_API_KEY || '';
     const headers = new Headers(options.headers || {});
 
     if (MANJU_API_KEY) {

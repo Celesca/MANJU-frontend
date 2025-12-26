@@ -2,10 +2,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  Send, User, Bot, Play, Pause, Square,
-  Settings, Save, RefreshCcw, ChevronLeft,
-  Volume2, Mic, MicOff, AlertCircle, CheckCircle,
-  Loader2, Info, Layout, Trash2, VolumeX, Zap
+  Send, User, Bot, Square,
+  Settings, ChevronLeft,
+  Volume2, Mic, AlertCircle,
+  Loader2, VolumeX, Zap
 } from 'lucide-react';
 import { apiFetch } from '../utils/api';
 import Navbar from '../components/Navbar';
@@ -97,7 +97,7 @@ export default function DemoPage() {
         setLoading(true);
 
         // Load project info
-        const projectRes = await apiFetch(`${API_BASE} /api/projects / ${projectId} `, {
+        const projectRes = await apiFetch(`${API_BASE}/api/projects/${projectId}`, {
           credentials: 'include',
         });
 
@@ -114,7 +114,7 @@ export default function DemoPage() {
 
         // Validate workflow and get workflow type in parallel
         const [validateRes, workflowTypeRes] = await Promise.all([
-          apiFetch(`${API_BASE} /api/projects / ${projectId}/validate`, {
+          apiFetch(`${API_BASE}/api/projects/${projectId}/validate`, {
             method: 'POST',
             credentials: 'include',
           }),
@@ -184,7 +184,7 @@ export default function DemoPage() {
 
       // For voice workflows, we could send the audio blob
       // For now, we'll send the transcription
-      const res = await fetch(`${API_BASE}/api/projects/${projectId}/demo`, {
+      const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/demo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -516,7 +516,7 @@ export default function DemoPage() {
         content: msg.content,
       }));
 
-      const res = await fetch(`${API_BASE}/api/projects/${projectId}/demo`, {
+      const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/demo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

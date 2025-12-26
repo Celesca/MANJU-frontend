@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X, ChevronRight, LogOut, User as ChevronDown } from "lucide-react";
+import { apiFetch } from "../utils/api";
 
 interface UserData {
   id: string;
@@ -36,14 +37,14 @@ const Navbar = () => {
   useEffect(() => {
     const checkUserLogin = () => {
       const userCookie = getCookie("manju_user");
-      console.log("Checking manju_user cookie (raw):", userCookie);
+      // console.log("Checking manju_user cookie (raw):", userCookie);
       if (userCookie) {
         try {
           // Decode from Base64
           const decodedValue = atob(decodeURIComponent(userCookie));
-          console.log("Decoded user data string:", decodedValue);
+          // console.log("Decoded user data string:", decodedValue);
           const userData = JSON.parse(decodedValue);
-          console.log("Parsed user data object:", userData);
+          // console.log("Parsed user data object:", userData);
           setUser(userData);
         } catch (error) {
           console.error("Failed to parse user cookie", error);
@@ -74,7 +75,7 @@ const Navbar = () => {
   const handleLogout = async () => {
     console.log("Attempting logout...");
     try {
-      const res = await fetch(`${API_BASE}/auth/logout`, {
+      const res = await apiFetch(`${API_BASE}/auth/logout`, {
         method: "GET",
         credentials: "include",
       });
