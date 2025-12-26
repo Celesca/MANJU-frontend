@@ -224,7 +224,7 @@ export default function ModelConfig() {
         if (!res.ok) throw new Error('Failed to create');
         const newProject = await res.json();
         setHasUnsavedChanges(false);
-        navigate(`/ model - config / ${newProject.id} `, { replace: true });
+        navigate(`/model-config/${newProject.id}`, { replace: true });
         await Swal.fire({ icon: 'success', title: 'Created', text: 'Project created.' });
       }
     } catch (err) {
@@ -296,11 +296,11 @@ export default function ModelConfig() {
       if (result.isConfirmed) {
         await handleSaveWorkflow();
         if (projectId) {
-          navigate(`/ demo / ${projectId} `);
+          navigate(`/demo/${projectId}`);
         }
       } else if (result.isDenied) {
         if (projectId) {
-          navigate(`/ demo / ${projectId} `);
+          navigate(`/demo/${projectId}`);
         } else {
           await Swal.fire({
             icon: 'info',
@@ -311,7 +311,7 @@ export default function ModelConfig() {
       }
     } else {
       if (projectId) {
-        navigate(`/ demo / ${projectId} `);
+        navigate(`/demo/${projectId}`);
       } else {
         await Swal.fire({
           icon: 'info',
