@@ -9,7 +9,7 @@ COPY package*.json ./
 # Install dependencies
 RUN npm install
 
-# Copy project files
+# Copy project files - each build gets fresh code
 COPY . .
 
 # Set Vite environment variables during build

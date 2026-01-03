@@ -164,17 +164,22 @@ if [ "$DEPLOY_FRONTEND" = true ]; then
         API_URL="https://$BACKEND_URL"
     fi
     
-    # Get MANJU_API_KEY from backend env vars
-    echo "Fetching MANJU_API_KEY from backend..."
-    MANJU_API_KEY=$(az containerapp show --name $BACKEND_APP_NAME --resource-group $RESOURCE_GROUP --query "properties.template.containers[0].env[?name=='MANJU_API_KEY'].value" --output tsv)
+    # Get MANJU_API_KEY - Azure doesn't expose secret values via API
+    # Check environment variable first, then prompt if not set
+    if [ -z "$MANJU_API_KEY" ]; then
+        echo ""
+        echo "MANJU_API_KEY not found in environment."
+        echo "Please enter the API key (same as backend MANJU_API_KEY):"
+        read -r MANJU_API_KEY
+    fi
     
     if [ -z "$MANJU_API_KEY" ]; then
-        echo "Warning: Could not find MANJU_API_KEY. API calls may fail."
-        MANJU_API_KEY=""
+        echo "Warning: MANJU_API_KEY is empty. API calls may fail."
+    else
+        echo "MANJU_API_KEY: (set)"
     fi
     
     echo "Setting VITE_API_URL to: $API_URL"
-    echo "Setting VITE_MANJU_API_KEY: (hidden)"
 
     az acr build --registry $ACR_NAME \
       --image $FRONTEND_APP_NAME:latest \
