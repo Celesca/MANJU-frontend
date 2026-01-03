@@ -14,7 +14,7 @@ interface UserData {
   regist_source?: string;
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -30,7 +30,7 @@ const Navbar = () => {
 
 
 
-  const { user: authUser, loading: authLoading } = useAuth();
+  const { user: authUser, loading: authLoading, logout } = useAuth();
 
   useEffect(() => {
     if (!authLoading) {
@@ -56,29 +56,17 @@ const Navbar = () => {
   }, []);
 
   const handleLogout = async () => {
-    console.log("Attempting logout...");
     try {
-      const res = await apiFetch(`${API_BASE}/auth/logout`, {
-        method: "GET",
-        credentials: "include",
-      });
-
-      console.log("Logout response status:", res.status);
-      if (res.ok) {
-        const data = await res.json();
-        console.log("Logout successful:", data);
-        setUser(null);
-        setIsProfileOpen(false);
-        document.cookie.split(";").forEach((c) => {
-          document.cookie = c
-            .replace(/^ +/, "")
-            .replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
-        });
-        window.location.href = "/login";
-      }
+      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+      await apiFetch(`${API_BASE}/auth/logout`, { method: "GET" });
     } catch (error) {
-      console.error("Logout failed", error);
+      console.error("Logout API call failed", error);
     }
+    // Always clear local state regardless of API success
+    logout();
+    setUser(null);
+    setIsProfileOpen(false);
+    window.location.href = "/login";
   };
 
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {

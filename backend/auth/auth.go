@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
-
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -16,16 +16,27 @@ import (
 	"manju/backend/repository"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"gorm.io/datatypes"
 )
 
 var googleOAuthConfig *oauth2.Config
+var jwtSecret []byte
 
 func init() {
-	// Prefer REDIRECT_URI (from .env) for consistency with the project file,
-	// fall back to OAUTH_REDIRECT_URL, then to a sensible default.
+	// JWT Secret from environment or generate random
+	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	if secret == "" {
+		secret = strings.TrimSpace(os.Getenv("ENCRYPTION_KEY"))
+	}
+	if secret == "" {
+		secret = "manju-default-secret-change-in-production"
+	}
+	jwtSecret = []byte(secret)
+
+	// OAuth config
 	redirect := strings.TrimSpace(os.Getenv("REDIRECT_URI"))
 	if redirect == "" {
 		redirect = strings.TrimSpace(os.Getenv("OAUTH_REDIRECT_URL"))
@@ -45,13 +56,61 @@ func init() {
 		},
 		Endpoint: google.Endpoint,
 	}
-	// Mask and log the client id and redirect for debugging (do not log secrets)
-	cid := os.Getenv("CLIENT_ID")
-	masked := cid
+	// Log masked client id
+	cid := clientID
 	if len(cid) > 8 {
-		masked = cid[:4] + "..." + cid[len(cid)-4:]
+		cid = cid[:4] + "..." + cid[len(cid)-4:]
 	}
-	log.Printf("OAuth CLIENT_ID=%s REDIRECT=%s", masked, redirect)
+	log.Printf("OAuth CLIENT_ID=%s REDIRECT=%s", cid, redirect)
+}
+
+// JWTClaims defines the claims in our JWT
+type JWTClaims struct {
+	UserID  string `json:"user_id"`
+	Email   string `json:"email"`
+	Name    string `json:"name"`
+	Picture string `json:"picture"`
+	jwt.RegisteredClaims
+}
+
+// GenerateJWT creates a signed JWT token for a user
+func GenerateJWT(userID, email, name, picture string) (string, error) {
+	claims := JWTClaims{
+		UserID:  userID,
+		Email:   email,
+		Name:    name,
+		Picture: picture,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    "manju",
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(jwtSecret)
+}
+
+// ValidateJWT parses and validates a JWT token
+func ValidateJWT(tokenString string) (*JWTClaims, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
+		return jwtSecret, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if claims, ok := token.Claims.(*JWTClaims); ok && token.Valid {
+		return claims, nil
+	}
+	return nil, jwt.ErrSignatureInvalid
+}
+
+// ExtractBearerToken extracts the token from Authorization header
+func ExtractBearerToken(c *fiber.Ctx) string {
+	auth := c.Get("Authorization")
+	if strings.HasPrefix(auth, "Bearer ") {
+		return strings.TrimPrefix(auth, "Bearer ")
+	}
+	return ""
 }
 
 func generateState(c *fiber.Ctx) (string, error) {
@@ -59,76 +118,31 @@ func generateState(c *fiber.Ctx) (string, error) {
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	// use RawURLEncoding to avoid padding (=) and keep the cookie a bit shorter
 	state := base64.RawURLEncoding.EncodeToString(b)
-	c.Cookie(&fiber.Cookie{ // set a short-lived cookie to verify state
+	// Use a simple cookie for state verification (short-lived, same-site)
+	c.Cookie(&fiber.Cookie{
 		Name:     "oauthstate",
 		Value:    state,
-		Expires:  time.Now().Add(1 * time.Hour),
+		Expires:  time.Now().Add(10 * time.Minute),
 		HTTPOnly: true,
 		Secure:   true,
-		SameSite: "None",
+		SameSite: "Lax",
 		Path:     "/",
 	})
 	return state, nil
 }
 
-// Login starts the OAuth2 flow and redirects the user to Google's consent screen.
+// Login starts the OAuth2 flow
 func Login(c *fiber.Ctx) error {
-	// Diagnostic logging: log request header and cookie size to help debug 431 errors
-	cookieHeader := c.Get("Cookie")
-	totalHeaderLen := 0
-	c.Request().Header.VisitAll(func(k, v []byte) {
-		totalHeaderLen += len(k) + len(v)
-	})
-	log.Printf("Auth Login request headers total bytes=%d cookieHeaderBytes=%d", totalHeaderLen, len(cookieHeader))
-
-	// Clear existing cookies sent by the browser to avoid oversized Cookie header
-	// which can cause 431 errors when redirecting to external providers.
-	// We parse the Cookie header and clear each cookie server-side.
-	if cookieHeader != "" {
-		parts := strings.Split(cookieHeader, ";")
-		cleared := make([]string, 0, len(parts))
-		for _, p := range parts {
-			p = strings.TrimSpace(p)
-			if p == "" {
-				continue
-			}
-			kv := strings.SplitN(p, "=", 2)
-			name := strings.TrimSpace(kv[0])
-			if name == "" {
-				continue
-			}
-			// Clear cookie by name
-			c.ClearCookie(name)
-			cleared = append(cleared, name)
-		}
-		if len(cleared) > 0 {
-			log.Printf("Cleared cookies before OAuth login: %v", cleared)
-		}
-	}
-
 	state, err := generateState(c)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).SendString("failed to generate oauth state")
 	}
-	url := googleOAuthConfig.AuthCodeURL(state, oauth2.AccessTypeOffline)
-	// Log the generated auth URL with client_id masked for diagnosis
-	// mask client_id value in the URL
-	maskedUrl := url
-	if cid := os.Getenv("CLIENT_ID"); cid != "" {
-		maskedCid := cid
-		if len(cid) > 8 {
-			maskedCid = cid[:4] + "..." + cid[len(cid)-4:]
-		}
-		maskedUrl = strings.ReplaceAll(maskedUrl, cid, maskedCid)
-	}
-	log.Printf("Auth URL: %s", maskedUrl)
-	return c.Redirect(url, fiber.StatusTemporaryRedirect)
+	authURL := googleOAuthConfig.AuthCodeURL(state, oauth2.AccessTypeOffline)
+	return c.Redirect(authURL, fiber.StatusTemporaryRedirect)
 }
 
-// Callback handles the OAuth2 callback from Google, exchanges the code for a token
-// and fetches basic user info. It returns the user info and token as JSON.
+// Callback handles the OAuth2 callback, creates user, generates JWT, and redirects to frontend
 func Callback(c *fiber.Ctx) error {
 	state := c.Query("state")
 	cookieState := c.Cookies("oauthstate")
@@ -140,11 +154,14 @@ func Callback(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).SendString("code not found")
 	}
 
+	// Exchange code for token
 	token, err := googleOAuthConfig.Exchange(context.Background(), code)
 	if err != nil {
+		log.Printf("Token exchange failed: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("failed to exchange token")
 	}
 
+	// Fetch user info from Google
 	client := googleOAuthConfig.Client(context.Background(), token)
 	resp, err := client.Get("https://www.googleapis.com/oauth2/v2/userinfo")
 	if err != nil {
@@ -161,11 +178,13 @@ func Callback(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("failed to parse userinfo")
 	}
 
-	// Persist user (create if not exists)
+	// Extract user info
 	email, _ := gu["email"].(string)
 	name, _ := gu["name"].(string)
+	picture, _ := gu["picture"].(string)
 	infoBytes, _ := json.Marshal(gu)
 
+	// Persist user (create if not exists)
 	userRepo := repository.New(database.Database)
 	user, err := userRepo.GetByEmail(email)
 	if err != nil {
@@ -185,168 +204,69 @@ func Callback(c *fiber.Ctx) error {
 		user = created
 	}
 
-	// Create server-side session and persist refresh token if provided
-	sessionRepo := repository.NewSession(database.Database)
-	var expires *time.Time
-	if !token.Expiry.IsZero() {
-		t := token.Expiry
-		expires = &t
-	}
-	session := &repository.Session{
-		UserID:       user.ID,
-		RefreshToken: token.RefreshToken,
-		ExpiresAt:    expires,
-	}
-	createdSession, err := sessionRepo.Create(session)
+	// Generate JWT
+	jwtToken, err := GenerateJWT(user.ID.String(), user.Email, user.Name, picture)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).SendString("failed to create session")
+		return c.Status(fiber.StatusInternalServerError).SendString("failed to generate token")
 	}
 
-	// Set httpOnly session cookie (do not expose tokens in URL)
-	cookie := &fiber.Cookie{
-		Name:     "manju_session",
-		Value:    createdSession.ID.String(),
-		Expires:  time.Now().Add(7 * 24 * time.Hour),
-		HTTPOnly: true,
-		Secure:   true,
-		SameSite: "None",
-		Path:     "/",
-	}
-	c.Cookie(cookie)
-	// -------------------------------------------------------------
-
-	// 1. เตรียม Map ข้อมูลที่จะใส่ใน Cookie
-	cookieData := map[string]interface{}{
-		"id":            user.ID,
-		"email":         user.Email,
-		"name":          user.Name,
-		"picture":       gu["picture"],  // ดึงรูปจาก Google
-		"regist_source": "google_oauth", // ค่าที่เพิ่มเอง
-	}
-
-	// 2. ดึงค่าจาก Cookie เดิม (เช่น pref_lang) มาใส่
-	if pref := c.Cookies("pref_lang"); pref != "" {
-		cookieData["preference_language"] = pref
-	} else {
-		cookieData["preference_language"] = "th" // ค่า Default ถ้าไม่มี
-	}
-
-	// 3. แปลงเป็น JSON String และ Encode เป็น Base64 เพื่อความปลอดภัยใน Cookie
-	userDataBytes, _ := json.Marshal(cookieData)
-	userDataString := base64.StdEncoding.EncodeToString(userDataBytes)
-
-	// 4. สร้าง Cookie ก้อนที่ 2 ชื่อ "manju_user"
+	// Clear oauth state cookie
 	c.Cookie(&fiber.Cookie{
-		Name:     "manju_user", // ชื่อ Cookie สำหรับเก็บข้อมูล User
-		Value:    userDataString,
-		Expires:  time.Now().Add(7 * 24 * time.Hour),
-		HTTPOnly: false,
-		Secure:   true,
-		SameSite: "None",
+		Name:     "oauthstate",
+		Value:    "",
 		Path:     "/",
+		Expires:  time.Now().Add(-1 * time.Hour),
+		HTTPOnly: true,
 	})
 
-	// -------------------------------------------------------------
-	// clear oauth state
-	c.ClearCookie("oauthstate")
-
+	// Redirect to frontend with token in URL fragment (fragment is not sent to server)
 	frontend := strings.TrimRight(strings.TrimSpace(os.Getenv("FRONTEND_URL")), "/")
 	if frontend == "" {
 		frontend = "http://localhost:5173"
 	}
-	return c.Redirect(frontend, fiber.StatusTemporaryRedirect)
+	// Use URL fragment so token is not logged in server access logs
+	redirectURL := frontend + "#token=" + url.QueryEscape(jwtToken)
+	return c.Redirect(redirectURL, fiber.StatusTemporaryRedirect)
 }
 
-// Me returns the authenticated user's basic info based on session cookie
+// Me returns the authenticated user's info based on JWT token
 func Me(c *fiber.Ctx) error {
-	sid := c.Cookies("manju_session")
-	if sid == "" {
-		return c.Status(fiber.StatusUnauthorized).SendString("unauthenticated")
+	tokenString := ExtractBearerToken(c)
+	if tokenString == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "no token provided"})
 	}
-	sessionRepo := repository.NewSession(database.Database)
-	sess, err := sessionRepo.GetByID(sid)
-	if err != nil || sess == nil {
-		return c.Status(fiber.StatusUnauthorized).SendString("unauthenticated")
-	}
-	userRepo := repository.New(database.Database)
-	user, err := userRepo.GetByID(sess.UserID.String())
-	if err != nil || user == nil {
-		return c.Status(fiber.StatusUnauthorized).SendString("unauthenticated")
-	}
-	var info map[string]interface{}
-	if len(user.Info) > 0 {
-		_ = json.Unmarshal(user.Info, &info)
+
+	claims, err := ValidateJWT(tokenString)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token"})
 	}
 
 	return c.JSON(fiber.Map{
-		"id":      user.ID,
-		"email":   user.Email,
-		"name":    user.Name,
-		"picture": info["picture"],
+		"id":      claims.UserID,
+		"email":   claims.Email,
+		"name":    claims.Name,
+		"picture": claims.Picture,
 	})
 }
 
-// RequireAuth is a middleware that ensures the request has a valid session.
-// It sets `userID` in `c.Locals` for downstream handlers.
+// RequireAuth is a middleware that validates JWT and sets userID in context
 func RequireAuth(c *fiber.Ctx) error {
-	sid := c.Cookies("manju_session")
-	if sid == "" {
-		return c.Status(fiber.StatusUnauthorized).SendString("unauthenticated")
+	tokenString := ExtractBearerToken(c)
+	if tokenString == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "no token provided"})
 	}
-	sessionRepo := repository.NewSession(database.Database)
-	sess, err := sessionRepo.GetByID(sid)
-	if err != nil || sess == nil {
-		return c.Status(fiber.StatusUnauthorized).SendString("unauthenticated")
+
+	claims, err := ValidateJWT(tokenString)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token"})
 	}
-	// Set userID for handlers
-	c.Locals("userID", sess.UserID.String())
+
+	c.Locals("userID", claims.UserID)
 	return c.Next()
 }
 
+// Logout just returns success - token invalidation is client-side
 func Logout(c *fiber.Ctx) error {
-	// 1. ลบ Session ใน Database (ถ้ามี)
-	sid := c.Cookies("manju_session")
-	if sid != "" {
-		sessionRepo := repository.NewSession(database.Database)
-		_ = sessionRepo.DeleteByID(sid)
-	}
-
-	// 2. สร้าง Cookie "manju_session" ใหม่เพื่อสั่งลบตัวเก่า
-	c.Cookie(&fiber.Cookie{
-		Name:     "manju_session",
-		Value:    "",                             // ค่าว่าง
-		Path:     "/",                            // <--- สำคัญมาก! ต้องตรงกับที่เห็นใน Browser
-		Expires:  time.Now().Add(-1 * time.Hour), // หมดอายุทันที (ย้อนหลัง 1 ชม.)
-		HTTPOnly: true,                           // ต้องตรงกับตอนสร้าง
-		Secure:   true,
-		SameSite: "None",
-	})
-
-	// 3. สร้าง Cookie "oauthstate" ใหม่เพื่อสั่งลบตัวเก่า
-	c.Cookie(&fiber.Cookie{
-		Name:     "oauthstate",
-		Value:    "",
-		Path:     "/", // <--- สำคัญมาก!
-		Expires:  time.Now().Add(-1 * time.Hour),
-		HTTPOnly: true,
-		Secure:   true,
-		SameSite: "None",
-	})
-
-	// 4. สร้าง Cookie "manju_user" ใหม่เพื่อสั่งลบตัวเก่า
-	c.Cookie(&fiber.Cookie{
-		Name:     "manju_user",
-		Value:    "",
-		Path:     "/",
-		Expires:  time.Now().Add(-1 * time.Hour),
-		HTTPOnly: false, // ตัวนี้ Frontend อ่านได้ (HttpOnly: false)
-		Secure:   true,
-		SameSite: "None",
-	})
-
-	// 5. ส่ง Response กลับไปให้ Frontend
-	// แนะนำให้ส่ง JSON Status OK แทน Redirect
-	// เพื่อให้ Frontend (fetch) รู้ว่าสำเร็จแน่นอน แล้วค่อยสั่ง reload หน้า
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"message": "Logged out successfully",
 	})

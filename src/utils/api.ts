@@ -1,7 +1,9 @@
 /**
  * Centralized API utility for MANJU frontend.
- * Automatically adds the X-API-Key header to all requests.
+ * Automatically adds the X-API-Key and Authorization headers to all requests.
  */
+
+import { authStore } from '../stores/authStore';
 
 export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
     const MANJU_API_KEY = import.meta.env.VITE_MANJU_API_KEY || '';
@@ -27,6 +29,12 @@ export async function apiFetch(url: string, options: RequestInit = {}): Promise<
     // Add API Key
     if (MANJU_API_KEY) {
         headers['X-API-Key'] = MANJU_API_KEY;
+    }
+
+    // Add JWT token if available
+    const token = authStore.getToken();
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
     }
 
     // Ensure Content-Type is set for JSON requests if not already set
