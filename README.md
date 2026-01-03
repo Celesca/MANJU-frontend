@@ -72,7 +72,7 @@
 
 | Name | Role | Socials |
 | :--- | :--- | :--- |
-| **Sawit Koseeyaumporn** (Folk) | AI Engineer / MLOps | [GitHub](https://github.com/crazyfolkza) |
+| **Sawit Koseeyaumporn** (Folk) | AI Engineer / MLOps | [GitHub](https://github.com//Celesca) |
 | **Siratee Saiprom** (Oat) | Full-Stack Developer | [GitHub](https://github.com/SOtwoX1) |
 | **Punchaya Chancharoen** (Pang) | Frontend / UX/UI | [GitHub](https://github.com/Kaewkloaw) |
 
