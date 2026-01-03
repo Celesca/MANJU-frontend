@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X, ChevronRight, LogOut, User as ChevronDown } from "lucide-react";
 import { apiFetch } from "../utils/api";
+import { useAuth } from "../hooks/useAuth";
 
 interface UserData {
   id: string;
@@ -27,42 +28,24 @@ const Navbar = () => {
   const whiteBgPages = ["/projects", "/profile", "/login", "/demo", "/features", "/pricing", "/about"];
   const isWhitePage = whiteBgPages.some(path => location.pathname.startsWith(path));
 
-  const getCookie = (name: string) => {
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-    if (parts.length === 2) return parts.pop()?.split(';').shift();
-    return null;
-  };
+
+
+  const { user: authUser, loading: authLoading } = useAuth();
 
   useEffect(() => {
-    const checkUserLogin = () => {
-      const userCookie = getCookie("manju_user");
-      // console.log("Checking manju_user cookie (raw):", userCookie);
-      if (userCookie) {
-        try {
-          // Decode from Base64
-          const decodedValue = atob(decodeURIComponent(userCookie));
-          // console.log("Decoded user data string:", decodedValue);
-          const userData = JSON.parse(decodedValue);
-          // console.log("Parsed user data object:", userData);
-          setUser(userData);
-        } catch (error) {
-          console.error("Failed to parse user cookie", error);
-          // Fallback: try parsing without atob in case it's not base64 yet
-          try {
-            const userData = JSON.parse(decodeURIComponent(userCookie));
-            setUser(userData);
-          } catch (e) {
-            setUser(null);
-          }
-        }
+    if (!authLoading) {
+      if (authUser) {
+        setUser({
+          id: authUser.id,
+          name: authUser.name || '',
+          email: authUser.email,
+          picture: authUser.picture || ''
+        });
       } else {
-        console.log("No manju_user cookie found");
         setUser(null);
       }
-    };
-    checkUserLogin();
-  }, []);
+    }
+  }, [authUser, authLoading]);
 
   useEffect(() => {
     const handleScroll = () => {

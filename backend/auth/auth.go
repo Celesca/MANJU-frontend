@@ -62,10 +62,13 @@ func generateState(c *fiber.Ctx) (string, error) {
 	// use RawURLEncoding to avoid padding (=) and keep the cookie a bit shorter
 	state := base64.RawURLEncoding.EncodeToString(b)
 	c.Cookie(&fiber.Cookie{ // set a short-lived cookie to verify state
-		Name:    "oauthstate",
-		Value:   state,
-		Expires: time.Now().Add(1 * time.Hour),
-		Path:    "/",
+		Name:     "oauthstate",
+		Value:    state,
+		Expires:  time.Now().Add(1 * time.Hour),
+		HTTPOnly: true,
+		Secure:   true,
+		SameSite: "None",
+		Path:     "/",
 	})
 	return state, nil
 }
@@ -205,7 +208,8 @@ func Callback(c *fiber.Ctx) error {
 		Value:    createdSession.ID.String(),
 		Expires:  time.Now().Add(7 * 24 * time.Hour),
 		HTTPOnly: true,
-		Secure:   false, // set true in production with HTTPS
+		Secure:   true,
+		SameSite: "None",
 		Path:     "/",
 	}
 	c.Cookie(cookie)
@@ -237,8 +241,8 @@ func Callback(c *fiber.Ctx) error {
 		Value:    userDataString,
 		Expires:  time.Now().Add(7 * 24 * time.Hour),
 		HTTPOnly: false,
-		Secure:   false,
-		SameSite: "Lax",
+		Secure:   true,
+		SameSite: "None",
 		Path:     "/",
 	})
 
@@ -246,7 +250,7 @@ func Callback(c *fiber.Ctx) error {
 	// clear oauth state
 	c.ClearCookie("oauthstate")
 
-	frontend := strings.TrimSpace(os.Getenv("FRONTEND_URL"))
+	frontend := strings.TrimRight(strings.TrimSpace(os.Getenv("FRONTEND_URL")), "/")
 	if frontend == "" {
 		frontend = "http://localhost:5173"
 	}
@@ -269,7 +273,17 @@ func Me(c *fiber.Ctx) error {
 	if err != nil || user == nil {
 		return c.Status(fiber.StatusUnauthorized).SendString("unauthenticated")
 	}
-	return c.JSON(fiber.Map{"id": user.ID, "email": user.Email, "name": user.Name})
+	var info map[string]interface{}
+	if len(user.Info) > 0 {
+		_ = json.Unmarshal(user.Info, &info)
+	}
+
+	return c.JSON(fiber.Map{
+		"id":      user.ID,
+		"email":   user.Email,
+		"name":    user.Name,
+		"picture": info["picture"],
+	})
 }
 
 // RequireAuth is a middleware that ensures the request has a valid session.
@@ -304,6 +318,8 @@ func Logout(c *fiber.Ctx) error {
 		Path:     "/",                            // <--- สำคัญมาก! ต้องตรงกับที่เห็นใน Browser
 		Expires:  time.Now().Add(-1 * time.Hour), // หมดอายุทันที (ย้อนหลัง 1 ชม.)
 		HTTPOnly: true,                           // ต้องตรงกับตอนสร้าง
+		Secure:   true,
+		SameSite: "None",
 	})
 
 	// 3. สร้าง Cookie "oauthstate" ใหม่เพื่อสั่งลบตัวเก่า
@@ -313,6 +329,8 @@ func Logout(c *fiber.Ctx) error {
 		Path:     "/", // <--- สำคัญมาก!
 		Expires:  time.Now().Add(-1 * time.Hour),
 		HTTPOnly: true,
+		Secure:   true,
+		SameSite: "None",
 	})
 
 	// 4. สร้าง Cookie "manju_user" ใหม่เพื่อสั่งลบตัวเก่า
@@ -322,6 +340,8 @@ func Logout(c *fiber.Ctx) error {
 		Path:     "/",
 		Expires:  time.Now().Add(-1 * time.Hour),
 		HTTPOnly: false, // ตัวนี้ Frontend อ่านได้ (HttpOnly: false)
+		Secure:   true,
+		SameSite: "None",
 	})
 
 	// 5. ส่ง Response กลับไปให้ Frontend

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../utils/api';
 
-type User = { id: string; email: string; name?: string } | null;
+type User = { id: string; email: string; name?: string; picture?: string } | null;
 
 export function useAuth() {
   const [user, setUser] = useState<User>(null);
