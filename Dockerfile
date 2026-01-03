@@ -12,9 +12,11 @@ RUN npm install
 # Copy project files
 COPY . .
 
-# Set Vite API URL during build (will be overridden by script if needed)
+# Set Vite environment variables during build
 ARG VITE_API_URL
+ARG VITE_MANJU_API_KEY
 ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_MANJU_API_KEY=$VITE_MANJU_API_KEY
 
 # Build the application
 RUN npm run build

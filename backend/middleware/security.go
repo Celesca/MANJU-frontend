@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"log"
 	"os"
 	"strings"
 
@@ -25,14 +24,14 @@ func APIKeyGuard() fiber.Handler {
 		apiKey := strings.TrimSpace(os.Getenv("MANJU_API_KEY"))
 		if apiKey == "" {
 			// If not set, allow all (safety for initial setup)
-			log.Println("[APIKeyGuard] MANJU_API_KEY not set, allowing request")
+			// log.Println("[APIKeyGuard] MANJU_API_KEY not set, allowing request")
 			return c.Next()
 		}
 
 		clientKey := c.Get("X-API-Key")
 
 		// Debug logging - remove in production
-		log.Printf("[APIKeyGuard] Path: %s, Expected Key: %s, Received Key: %s", path, apiKey, clientKey)
+		// log.Printf("[APIKeyGuard] Path: %s, Expected Key: %s, Received Key: %s", path, apiKey, clientKey)
 
 		if clientKey == "" || clientKey != apiKey {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{

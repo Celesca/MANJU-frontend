@@ -13,7 +13,7 @@ export function useAuth() {
       try {
         const API_BASE = (import.meta.env.VITE_API_URL as string) || '';
         const url = API_BASE ? `${API_BASE}/auth/me` : '/auth/me';
-        console.log('[useAuth] Calling apiFetch with URL:', url);
+        // console.log('[useAuth] Calling apiFetch with URL:', url);
         const res = await apiFetch(url, { credentials: 'include' });
         if (!mounted) return;
         if (!res.ok) {

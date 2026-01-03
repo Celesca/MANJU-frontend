@@ -164,12 +164,23 @@ if [ "$DEPLOY_FRONTEND" = true ]; then
         API_URL="https://$BACKEND_URL"
     fi
     
+    # Get MANJU_API_KEY from backend env vars
+    echo "Fetching MANJU_API_KEY from backend..."
+    MANJU_API_KEY=$(az containerapp show --name $BACKEND_APP_NAME --resource-group $RESOURCE_GROUP --query "properties.template.containers[0].env[?name=='MANJU_API_KEY'].value" --output tsv)
+    
+    if [ -z "$MANJU_API_KEY" ]; then
+        echo "Warning: Could not find MANJU_API_KEY. API calls may fail."
+        MANJU_API_KEY=""
+    fi
+    
     echo "Setting VITE_API_URL to: $API_URL"
+    echo "Setting VITE_MANJU_API_KEY: (hidden)"
 
     az acr build --registry $ACR_NAME \
       --image $FRONTEND_APP_NAME:latest \
       --image $FRONTEND_APP_NAME:$TIMESTAMP \
       --build-arg VITE_API_URL=$API_URL \
+      --build-arg VITE_MANJU_API_KEY=$MANJU_API_KEY \
       .
     
     if [ $? -ne 0 ]; then
