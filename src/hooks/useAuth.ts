@@ -38,17 +38,7 @@ export function useAuth() {
   }, []);
 
   useEffect(() => {
-    // Check for token in URL fragment (after OAuth redirect)
-    if (typeof window !== 'undefined') {
-      const hash = window.location.hash;
-      if (hash.startsWith('#token=')) {
-        const token = decodeURIComponent(hash.substring(7));
-        authStore.setToken(token);
-        // Remove token from URL without triggering navigation
-        window.history.replaceState(null, '', window.location.pathname + window.location.search);
-      }
-    }
-
+    // Token extraction is handled in main.tsx before React renders
     fetchUser();
   }, [fetchUser]);
 

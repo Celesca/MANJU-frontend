@@ -35,6 +35,9 @@ export async function apiFetch(url: string, options: RequestInit = {}): Promise<
     const token = authStore.getToken();
     if (token) {
         headers['Authorization'] = `Bearer ${token}`;
+        console.log('[apiFetch] JWT token attached (length:', token.length, ')');
+    } else {
+        console.log('[apiFetch] No JWT token available');
     }
 
     // Ensure Content-Type is set for JSON requests if not already set
