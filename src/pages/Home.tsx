@@ -4,6 +4,7 @@ import Navbar from "../components/Navbar";
 import TextWelcome from "../components/TextType";
 import Aurora from "../components/Backgound";
 import UserCardSwap from "../components/UserCardSwap";
+import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import VoiceStudio from "./Voice";
 import TutorialSection from "../components/TutorialSection";
@@ -63,10 +64,20 @@ export default function Home() {
                 className="inline-block"
               >
                 {showFirst ? (
-                  <TextWelcome
-                    className="text-7xl sm:text-8xl lg:text-9xl font-black tracking-tighter transition-all duration-700 ease-out"
-                    text="MANJU"
-                  />
+                  <div className="flex flex-col items-center">
+                    <TextWelcome
+                      className="text-7xl sm:text-8xl lg:text-9xl font-black tracking-tighter transition-all duration-700 ease-out"
+                      text="MANJU"
+                    />
+                    <motion.p
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.5 }}
+                      className="text-xl md:text-2xl font-medium text-slate-600 tracking-widest uppercase mt-4"
+                    >
+                      Powered by <span className="text-violet-600 font-bold">LIMITLESS</span>
+                    </motion.p>
+                  </div>
                 ) : (
                   <TextWelcome
                     className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight transition-all duration-700 ease-out leading-tight"
@@ -346,7 +357,7 @@ export default function Home() {
             </div>
           </div>
         </div>
-        <FaqPage/>
+        <FaqPage />
         <Footer />
 
       </div> {/* End of relative z-20 (Main content) */}

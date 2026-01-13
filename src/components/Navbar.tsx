@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X, ChevronRight, LogOut, User as ChevronDown } from "lucide-react";
 import { apiFetch } from "../utils/api";
+import { useAuth } from "../hooks/useAuth";
 
 interface UserData {
   id: string;
@@ -13,7 +14,7 @@ interface UserData {
   regist_source?: string;
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -24,45 +25,27 @@ const Navbar = () => {
 
   const location = useLocation();
 
-  const whiteBgPages = ["/projects", "/profile", "/login", "/demo", "/features", "/pricing", "/about"];
+  const whiteBgPages = ["/console", "/projects", "/profile", "/login", "/demo", "/features", "/pricing", "/about"];
   const isWhitePage = whiteBgPages.some(path => location.pathname.startsWith(path));
 
-  const getCookie = (name: string) => {
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-    if (parts.length === 2) return parts.pop()?.split(';').shift();
-    return null;
-  };
+
+
+  const { user: authUser, loading: authLoading, logout } = useAuth();
 
   useEffect(() => {
-    const checkUserLogin = () => {
-      const userCookie = getCookie("manju_user");
-      // console.log("Checking manju_user cookie (raw):", userCookie);
-      if (userCookie) {
-        try {
-          // Decode from Base64
-          const decodedValue = atob(decodeURIComponent(userCookie));
-          // console.log("Decoded user data string:", decodedValue);
-          const userData = JSON.parse(decodedValue);
-          // console.log("Parsed user data object:", userData);
-          setUser(userData);
-        } catch (error) {
-          console.error("Failed to parse user cookie", error);
-          // Fallback: try parsing without atob in case it's not base64 yet
-          try {
-            const userData = JSON.parse(decodeURIComponent(userCookie));
-            setUser(userData);
-          } catch (e) {
-            setUser(null);
-          }
-        }
+    if (!authLoading) {
+      if (authUser) {
+        setUser({
+          id: authUser.id,
+          name: authUser.name || '',
+          email: authUser.email,
+          picture: authUser.picture || ''
+        });
       } else {
-        console.log("No manju_user cookie found");
         setUser(null);
       }
-    };
-    checkUserLogin();
-  }, []);
+    }
+  }, [authUser, authLoading]);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -73,29 +56,17 @@ const Navbar = () => {
   }, []);
 
   const handleLogout = async () => {
-    console.log("Attempting logout...");
     try {
-      const res = await apiFetch(`${API_BASE}/auth/logout`, {
-        method: "GET",
-        credentials: "include",
-      });
-
-      console.log("Logout response status:", res.status);
-      if (res.ok) {
-        const data = await res.json();
-        console.log("Logout successful:", data);
-        setUser(null);
-        setIsProfileOpen(false);
-        document.cookie.split(";").forEach((c) => {
-          document.cookie = c
-            .replace(/^ +/, "")
-            .replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
-        });
-        window.location.href = "/login";
-      }
+      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+      await apiFetch(`${API_BASE}/auth/logout`, { method: "GET" });
     } catch (error) {
-      console.error("Logout failed", error);
+      console.error("Logout API call failed", error);
     }
+    // Always clear local state regardless of API success
+    logout();
+    setUser(null);
+    setIsProfileOpen(false);
+    window.location.href = "/login";
   };
 
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
@@ -115,7 +86,6 @@ const Navbar = () => {
 
   const navLinks = [
     { name: "Home", href: "/" },
-    { name: "Projects", href: "/projects" },
     { name: "Features", href: "/features" },
     { name: "About", href: "/about" },
     { name: "Pricing", href: "/pricing" },
@@ -137,9 +107,14 @@ const Navbar = () => {
               className={`w-8 h-8 rounded-md object-cover ${logoColor}`}
               alt="Logo"
             />
-            <span className={`text-xl font-bold tracking-tight ${logoColor} group-hover:text-purple-600 transition-colors`}>
-              MANJU
-            </span>
+            <div className="flex flex-col">
+              <span className={`text-xl font-bold tracking-tight ${logoColor} group-hover:text-purple-600 transition-colors leading-none`}>
+                MANJU
+              </span>
+              <span className={`text-[10px] font-medium tracking-[0.2em] ${logoColor} opacity-70 uppercase leading-none mt-1`}>
+                Powered by LIMITLESS
+              </span>
+            </div>
           </Link>
 
           <ul className="hidden md:flex items-center gap-8">
@@ -158,66 +133,81 @@ const Navbar = () => {
 
           <div className="hidden md:flex items-center gap-4 relative">
             {user ? (
-              <div className="relative">
-                <button
-                  onClick={() => setIsProfileOpen(!isProfileOpen)}
-                  className={`flex items-center gap-3 p-1 pr-3 rounded-full transition-all border ${borderColor} ${hoverBgUser}`}
-                >
-                  <img
-                    src={user.picture}
-                    onError={handleImageError}
-                    alt={user.name}
-                    className="w-8 h-8 rounded-full border border-white/50 shadow-sm object-cover"
-                  />
-                  <span className={`text-sm font-medium max-w-[100px] truncate ${textColor}`}>
-                    {user.name}
-                  </span>
-                  <ChevronDown size={14} className={textColor} />
-                </button>
+              <>
+                {/* Console Button */}
+                <Link to="/console">
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="bg-slate-900 text-white px-4 py-2 rounded-full text-sm font-semibold shadow-lg shadow-slate-900/20 hover:shadow-slate-900/40 flex items-center gap-2 transition-all"
+                  >
+                    Console
+                    <ChevronRight size={16} />
+                  </motion.button>
+                </Link>
 
-                <AnimatePresence>
-                  {isProfileOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden py-1 z-50"
-                    >
-                      <div className="px-4 py-3 border-b border-slate-100">
-                        <p className="text-sm font-semibold text-slate-800 truncate">{user.name}</p>
-                        <p className="text-xs text-slate-500 truncate">{user.email}</p>
-                      </div>
+                {/* User Profile */}
+                <div className="relative">
+                  <button
+                    onClick={() => setIsProfileOpen(!isProfileOpen)}
+                    className={`flex items-center gap-3 p-1 pr-3 rounded-full transition-all border ${borderColor} ${hoverBgUser}`}
+                  >
+                    <img
+                      src={user.picture}
+                      onError={handleImageError}
+                      alt={user.name}
+                      className="w-8 h-8 rounded-full border border-white/50 shadow-sm object-cover"
+                    />
+                    <span className={`text-sm font-medium max-w-[100px] truncate ${textColor}`}>
+                      {user.name}
+                    </span>
+                    <ChevronDown size={14} className={textColor} />
+                  </button>
 
-                      {/* <Link to="/profile" className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-purple-50 hover:text-purple-700 transition-colors">
+                  <AnimatePresence>
+                    {isProfileOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                        className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden py-1 z-50"
+                      >
+                        <div className="px-4 py-3 border-b border-slate-100">
+                          <p className="text-sm font-semibold text-slate-800 truncate">{user.name}</p>
+                          <p className="text-xs text-slate-500 truncate">{user.email}</p>
+                        </div>
+
+                        {/* <Link to="/profile" className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-purple-50 hover:text-purple-700 transition-colors">
                         <UserIcon size={16} />
                         Profile
                       </Link> */}
 
-                      <Link
-                        to="/settings"
-                        className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-purple-50 hover:text-purple-700 transition-colors"
-                        onClick={() => setIsProfileOpen(false)}
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-                        </svg>
-                        API Key Settings
-                      </Link>
+                        <Link
+                          to="/settings"
+                          className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-purple-50 hover:text-purple-700 transition-colors"
+                          onClick={() => setIsProfileOpen(false)}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                          </svg>
+                          API Key Settings
+                        </Link>
 
-                      <div className="border-t border-slate-100 my-1"></div>
+                        <div className="border-t border-slate-100 my-1"></div>
 
 
-                      <button
-                        onClick={handleLogout}
-                        className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
-                      >
-                        <LogOut size={16} />
-                        Sign out
-                      </button>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+                        <button
+                          onClick={handleLogout}
+                          className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                        >
+                          <LogOut size={16} />
+                          Sign out
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </>
             ) : (
               <>
                 <Link

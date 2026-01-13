@@ -34,7 +34,7 @@ func main() {
 	app := fiber.New()
 
 	// CORS: allow frontend origin and enable credentials (so cookies are sent)
-	frontend := strings.TrimSpace(os.Getenv("FRONTEND_URL"))
+	frontend := strings.TrimRight(strings.TrimSpace(os.Getenv("FRONTEND_URL")), "/")
 	if frontend == "" {
 		frontend = "http://localhost:5173"
 	}

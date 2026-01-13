@@ -39,12 +39,12 @@ export default function WorkflowCanvas({
 
   // Ref สำหรับกัน Click event ชนกับ Marquee selection
   const preventClickRef = useRef(false);
-  
+
   // Node dragging state
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragNodeStart, setDragNodeStart] = useState({ x: 0, y: 0 });
-  
+
   // Connection drawing state
   const [isDrawingConnection, setIsDrawingConnection] = useState(false);
   const [connectionStart, setConnectionStart] = useState<{
@@ -55,11 +55,11 @@ export default function WorkflowCanvas({
     y: number;
   } | null>(null);
   const [connectionEnd, setConnectionEnd] = useState<{ x: number; y: number } | null>(null);
-  
+
   // Multi-selection state
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
   const [selectedConnectionIds, setSelectedConnectionIds] = useState<Set<string>>(new Set());
-  
+
   // Marquee selection state
   const [isMarqueeSelecting, setIsMarqueeSelecting] = useState(false);
   const [marqueeStart, setMarqueeStart] = useState<{ x: number; y: number } | null>(null);
@@ -84,7 +84,7 @@ export default function WorkflowCanvas({
 
     const target = e.target as HTMLElement;
     const isCanvasBackground = target === canvasRef.current || target.classList.contains('canvas-transform-layer');
-    
+
     // Middle-click or Alt+click always pans
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
       e.preventDefault();
@@ -92,7 +92,7 @@ export default function WorkflowCanvas({
       setPanStart({ x: e.clientX - offset.x, y: e.clientY - offset.y });
       return;
     }
-    
+
     // Left-click on empty canvas with Shift = pan
     if (e.button === 0 && e.shiftKey && isCanvasBackground) {
       e.preventDefault();
@@ -100,7 +100,7 @@ export default function WorkflowCanvas({
       setPanStart({ x: e.clientX - offset.x, y: e.clientY - offset.y });
       return;
     }
-    
+
     // Left-click on empty canvas = start marquee selection
     if (e.button === 0 && isCanvasBackground && !e.altKey && !e.shiftKey) {
       if (!canvasRef.current) return;
@@ -137,7 +137,7 @@ export default function WorkflowCanvas({
 
       const template: NodeTemplate = JSON.parse(templateData);
       const rect = canvasRef.current.getBoundingClientRect();
-      
+
       // Calculate position accounting for node size (center the node under cursor)
       const nodeWidth = 180; // min-w-[180px]
       const nodeHeight = 80; // approximate height
@@ -155,7 +155,7 @@ export default function WorkflowCanvas({
   const handleNodeDragStart = (nodeId: string, e: React.MouseEvent) => {
     const node = nodes.find((n) => n.id === nodeId);
     if (!node || !canvasRef.current) return;
-    
+
     const rect = canvasRef.current.getBoundingClientRect();
     setDraggingNodeId(nodeId);
     setDragStart({ x: e.clientX - rect.left, y: e.clientY - rect.top });
@@ -172,15 +172,15 @@ export default function WorkflowCanvas({
   ) => {
     e.stopPropagation();
     e.preventDefault();
-    
+
     const node = nodes.find((n) => n.id === nodeId);
     if (!node) return;
 
     // Find the port to get its position
-    const port = portType === 'output' 
+    const port = portType === 'output'
       ? node.outputs.find(p => p.id === portId)
       : node.inputs.find(p => p.id === portId);
-    
+
     const nodeWidth = 180;
     const nodeHeight = 80; // approximate
     let portX: number;
@@ -214,7 +214,7 @@ export default function WorkflowCanvas({
   // When a node is selected, handle multi-select with Ctrl/Cmd
   const handleSelectNode = (nodeId: string | null, e?: React.MouseEvent) => {
     const isMultiSelect = e?.ctrlKey || e?.metaKey;
-    
+
     if (nodeId === null) {
       if (!isMultiSelect) {
         setSelectedNodeIds(new Set());
@@ -223,10 +223,10 @@ export default function WorkflowCanvas({
       onNodeSelect(null);
       return;
     }
-    
+
     // Clear connection selection when selecting nodes
     setSelectedConnectionIds(new Set());
-    
+
     if (isMultiSelect) {
       // Toggle node in multi-selection
       setSelectedNodeIds(prev => {
@@ -244,15 +244,15 @@ export default function WorkflowCanvas({
     }
     onNodeSelect(nodeId);
   };
-  
+
   // Handle connection selection with multi-select
   const handleSelectConnection = (connectionId: string, e?: React.MouseEvent) => {
     const isMultiSelect = e?.ctrlKey || e?.metaKey;
-    
+
     // Clear node selection when selecting connections
     setSelectedNodeIds(new Set());
     onNodeSelect(null);
-    
+
     if (isMultiSelect) {
       setSelectedConnectionIds(prev => {
         const newSet = new Set(prev);
@@ -267,21 +267,21 @@ export default function WorkflowCanvas({
       setSelectedConnectionIds(new Set([connectionId]));
     }
   };
-  
+
   // Check if a node intersects with the marquee rectangle
   const nodeIntersectsMarquee = (node: WorkflowNodeType, marqStart: Position, marqEnd: Position): boolean => {
     const nodeWidth = 180;
     const nodeHeight = 80;
-    
+
     const minX = Math.min(marqStart.x, marqEnd.x);
     const maxX = Math.max(marqStart.x, marqEnd.x);
     const minY = Math.min(marqStart.y, marqEnd.y);
     const maxY = Math.max(marqStart.y, marqEnd.y);
-    
-    return !(node.position.x + nodeWidth < minX || 
-             node.position.x > maxX || 
-             node.position.y + nodeHeight < minY || 
-             node.position.y > maxY);
+
+    return !(node.position.x + nodeWidth < minX ||
+      node.position.x > maxX ||
+      node.position.y + nodeHeight < minY ||
+      node.position.y > maxY);
   };
 
   // Approximate connection intersection with marquee by sampling points along the cubic curve
@@ -373,7 +373,7 @@ export default function WorkflowCanvas({
       });
       return;
     }
-    
+
     // Handle marquee selection
     if (isMarqueeSelecting && canvasRef.current) {
       const rect = canvasRef.current.getBoundingClientRect();
@@ -398,23 +398,23 @@ export default function WorkflowCanvas({
       });
       return;
     }
-    
+
     // Handle node dragging
     if (draggingNodeId && canvasRef.current) {
       const rect = canvasRef.current.getBoundingClientRect();
       const currentX = e.clientX - rect.left;
       const currentY = e.clientY - rect.top;
-      
+
       // Calculate new position based on drag delta
       const deltaX = (currentX - dragStart.x) / zoom;
       const deltaY = (currentY - dragStart.y) / zoom;
-      
+
       onNodeMove(draggingNodeId, {
         x: dragNodeStart.x + deltaX,
         y: dragNodeStart.y + deltaY,
       });
     }
-    
+
     if (isDrawingConnection && canvasRef.current) {
       const rect = canvasRef.current.getBoundingClientRect();
       setConnectionEnd({
@@ -454,7 +454,7 @@ export default function WorkflowCanvas({
     const dx = Math.abs(marqEnd.x - marqStart.x);
     const dy = Math.abs(marqEnd.y - marqStart.y);
     if (dx > 2 || dy > 2) {
-        preventClickRef.current = true;
+      preventClickRef.current = true;
     }
 
     setIsMarqueeSelecting(false);
@@ -467,13 +467,13 @@ export default function WorkflowCanvas({
   const handleCanvasMouseUp = (e: React.MouseEvent) => {
     setIsPanning(false);
     setDraggingNodeId(null);
-    
+
     // Finalize marquee selection
     if (isMarqueeSelecting && marqueeStart && marqueeEnd) {
       finalizeMarqueeSelection(marqueeStart, marqueeEnd);
       return;
     }
-    
+
     if (isDrawingConnection && connectionStart) {
       // Check if we dropped on a valid port
       const target = e.target as HTMLElement;
@@ -498,7 +498,7 @@ export default function WorkflowCanvas({
         });
       }
     }
-    
+
     setIsDrawingConnection(false);
     setConnectionStart(null);
     setConnectionEnd(null);
@@ -508,32 +508,32 @@ export default function WorkflowCanvas({
   const renderConnections = () => {
     const nodeWidth = 180;
     const nodeHeight = 80;
-    
+
     return connections.map((conn) => {
       const sourceNode = nodes.find((n) => n.id === conn.sourceNodeId);
       const targetNode = nodes.find((n) => n.id === conn.targetNodeId);
-      
+
       if (!sourceNode || !targetNode) return null;
 
       // Find source port index
       const rightOutputs = sourceNode.outputs.filter(p => p.position !== 'bottom');
       const sourcePortIndex = rightOutputs.findIndex(p => p.id === conn.sourcePortId);
-      
+
       // Find target port
       const targetPort = targetNode.inputs.find(p => p.id === conn.targetPortId);
       const leftInputs = targetNode.inputs.filter(p => p.position !== 'bottom');
       const bottomInputs = targetNode.inputs.filter(p => p.position === 'bottom');
       const targetPortIndex = leftInputs.findIndex(p => p.id === conn.targetPortId);
       const targetBottomIndex = bottomInputs.findIndex(p => p.id === conn.targetPortId);
-      
+
       // Calculate source position (always right side for outputs)
       const sourceX = sourceNode.position.x + nodeWidth + 6;
       const sourceY = sourceNode.position.y + 32 + Math.max(0, sourcePortIndex) * 28;
-      
+
       // Calculate target position
       let targetX: number;
       let targetY: number;
-      
+
       if (targetPort?.position === 'bottom') {
         // Bottom port
         targetX = targetNode.position.x + 90 + targetBottomIndex * 40;
@@ -615,6 +615,16 @@ export default function WorkflowCanvas({
   // Handle Backspace/Delete and Ctrl/Cmd+Z
   useEffect(() => {
     const handler = (ev: KeyboardEvent) => {
+      // Skip if user is typing in an input field
+      const activeElement = document.activeElement;
+      const isInputFocused = activeElement?.tagName === 'INPUT'
+        || activeElement?.tagName === 'TEXTAREA'
+        || activeElement?.getAttribute('contenteditable') === 'true';
+
+      if (isInputFocused && (ev.key === 'Backspace' || ev.key === 'Delete')) {
+        return; // Let the input handle the keypress
+      }
+
       // Undo
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') {
         ev.preventDefault();
@@ -632,7 +642,7 @@ export default function WorkflowCanvas({
           onNodeSelect(null);
           return;
         }
-        
+
         // Delete all selected connections
         if (selectedConnectionIds.size > 0 && onConnectionDelete) {
           selectedConnectionIds.forEach(connId => {
@@ -641,7 +651,7 @@ export default function WorkflowCanvas({
           setSelectedConnectionIds(new Set());
           return;
         }
-        
+
         // Fallback: delete single selected node
         if (selectedNodeId) {
           onNodeDelete(selectedNodeId);
@@ -702,8 +712,8 @@ export default function WorkflowCanvas({
         >
           <Trash2 className="w-4 h-4" />
           <span className="text-sm">
-            {selectedNodeIds.size > 1 
-              ? `Delete ${selectedNodeIds.size} Nodes` 
+            {selectedNodeIds.size > 1
+              ? `Delete ${selectedNodeIds.size} Nodes`
               : 'Delete Node'}
           </span>
         </motion.button>
@@ -723,8 +733,8 @@ export default function WorkflowCanvas({
         >
           <Trash2 className="w-4 h-4" />
           <span className="text-sm">
-            {selectedConnectionIds.size > 1 
-              ? `Delete ${selectedConnectionIds.size} Connections` 
+            {selectedConnectionIds.size > 1
+              ? `Delete ${selectedConnectionIds.size} Connections`
               : 'Delete Connection'}
           </span>
         </motion.button>
@@ -802,7 +812,7 @@ export default function WorkflowCanvas({
                 strokeLinecap="round"
               />
             )}
-            
+
             {/* Marquee selection rectangle */}
             {isMarqueeSelecting && marqueeStart && marqueeEnd && (
               <rect

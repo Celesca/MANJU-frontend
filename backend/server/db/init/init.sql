@@ -2,8 +2,8 @@
 -- This script will be executed as the Postgres superuser on first start
 -- Create useful extension and example table for quick initial testing
 
--- Enable uuid generation extension if needed (not strictly required for gen_random_uuid in Postgres 13+)
--- CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- Enable uuid generation extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Example: create a sample table that mirrors the model used by the server.
 CREATE TABLE IF NOT EXISTS users (
