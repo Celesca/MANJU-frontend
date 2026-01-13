@@ -9,7 +9,7 @@ import (
 
 // Voice model
 type Voice struct {
-	ID        uuid.UUID  `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
+	ID        uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	VoiceName string     `gorm:"not null" json:"voice_name"`
 	VoiceURL  string     `gorm:"not null" json:"voice_url"`
 	RefText   string     `json:"ref_text"`
