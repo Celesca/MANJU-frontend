@@ -27,7 +27,7 @@ export default function VoicesContent() {
     const [voices, setVoices] = useState<Voice[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
-    const [sortBy, setSortBy] = useState<'latest' | 'name'>('latest');
+    const [sortBy,] = useState<'latest' | 'name'>('latest');
     const [activeVoice, setActiveVoice] = useState<Voice | null>(null);
 
     // Fetch voices on mount
