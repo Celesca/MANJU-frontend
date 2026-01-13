@@ -367,18 +367,20 @@ export default function CreateVoicePage() {
                                     <label className="block text-sm font-medium text-gray-700 mb-4">
                                         Voice's Age range
                                     </label>
-                                    <div className="relative">
+                                    <div className="relative px-2">
                                         <input
                                             type="range"
                                             min="0"
                                             max="4"
+                                            step="1"
                                             value={ageRanges.findIndex((a) => a.value === ageRange)}
                                             onChange={(e) => setAgeRange(ageRanges[parseInt(e.target.value)].value)}
                                             className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-slate-900"
+                                            style={{ accentColor: '#0f172a' }}
                                         />
-                                        <div className="flex justify-between mt-2">
+                                        <div className="flex justify-between mt-3 -mx-2">
                                             {ageRanges.map((age) => (
-                                                <div key={age.value} className="text-center">
+                                                <div key={age.value} className="flex-1 text-center">
                                                     <p className={`text-xs font-medium ${ageRange === age.value ? 'text-slate-900' : 'text-gray-400'}`}>
                                                         {age.label}
                                                     </p>

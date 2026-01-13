@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Play, Pause, RotateCcw, RotateCw, Download } from 'lucide-react';
+import { Play, Pause, RotateCcw, RotateCw } from 'lucide-react';
 
 interface VoiceAudioPlayerProps {
     src: string;
@@ -18,10 +18,32 @@ export default function VoiceAudioPlayer({
     compact = false,
 }: VoiceAudioPlayerProps) {
     const audioRef = useRef<HTMLAudioElement>(null);
+    const animationRef = useRef<number | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
     const [rotation, setRotation] = useState(0);
+
+    // Spinning animation using requestAnimationFrame
+    useEffect(() => {
+        if (isPlaying) {
+            const animate = () => {
+                setRotation((prev) => prev + 1);
+                animationRef.current = requestAnimationFrame(animate);
+            };
+            animationRef.current = requestAnimationFrame(animate);
+        } else {
+            if (animationRef.current) {
+                cancelAnimationFrame(animationRef.current);
+            }
+        }
+
+        return () => {
+            if (animationRef.current) {
+                cancelAnimationFrame(animationRef.current);
+            }
+        };
+    }, [isPlaying]);
 
     useEffect(() => {
         const audio = audioRef.current;
@@ -33,9 +55,6 @@ export default function VoiceAudioPlayer({
 
         const handleTimeUpdate = () => {
             setCurrentTime(audio.currentTime);
-            if (isPlaying) {
-                setRotation((prev) => prev + 2);
-            }
         };
 
         const handleEnded = () => {
@@ -51,7 +70,7 @@ export default function VoiceAudioPlayer({
             audio.removeEventListener('timeupdate', handleTimeUpdate);
             audio.removeEventListener('ended', handleEnded);
         };
-    }, [isPlaying]);
+    }, []);
 
     const togglePlay = () => {
         const audio = audioRef.current;
