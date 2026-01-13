@@ -25,7 +25,7 @@ const Navbar = () => {
 
   const location = useLocation();
 
-  const whiteBgPages = ["/projects", "/profile", "/login", "/demo", "/features", "/pricing", "/about"];
+  const whiteBgPages = ["/console", "/projects", "/profile", "/login", "/demo", "/features", "/pricing", "/about"];
   const isWhitePage = whiteBgPages.some(path => location.pathname.startsWith(path));
 
 
@@ -86,7 +86,6 @@ const Navbar = () => {
 
   const navLinks = [
     { name: "Home", href: "/" },
-    { name: "Projects", href: "/projects" },
     { name: "Features", href: "/features" },
     { name: "About", href: "/about" },
     { name: "Pricing", href: "/pricing" },
@@ -129,66 +128,81 @@ const Navbar = () => {
 
           <div className="hidden md:flex items-center gap-4 relative">
             {user ? (
-              <div className="relative">
-                <button
-                  onClick={() => setIsProfileOpen(!isProfileOpen)}
-                  className={`flex items-center gap-3 p-1 pr-3 rounded-full transition-all border ${borderColor} ${hoverBgUser}`}
-                >
-                  <img
-                    src={user.picture}
-                    onError={handleImageError}
-                    alt={user.name}
-                    className="w-8 h-8 rounded-full border border-white/50 shadow-sm object-cover"
-                  />
-                  <span className={`text-sm font-medium max-w-[100px] truncate ${textColor}`}>
-                    {user.name}
-                  </span>
-                  <ChevronDown size={14} className={textColor} />
-                </button>
+              <>
+                {/* Console Button */}
+                <Link to="/console">
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="bg-slate-900 text-white px-4 py-2 rounded-full text-sm font-semibold shadow-lg shadow-slate-900/20 hover:shadow-slate-900/40 flex items-center gap-2 transition-all"
+                  >
+                    Console
+                    <ChevronRight size={16} />
+                  </motion.button>
+                </Link>
 
-                <AnimatePresence>
-                  {isProfileOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden py-1 z-50"
-                    >
-                      <div className="px-4 py-3 border-b border-slate-100">
-                        <p className="text-sm font-semibold text-slate-800 truncate">{user.name}</p>
-                        <p className="text-xs text-slate-500 truncate">{user.email}</p>
-                      </div>
+                {/* User Profile */}
+                <div className="relative">
+                  <button
+                    onClick={() => setIsProfileOpen(!isProfileOpen)}
+                    className={`flex items-center gap-3 p-1 pr-3 rounded-full transition-all border ${borderColor} ${hoverBgUser}`}
+                  >
+                    <img
+                      src={user.picture}
+                      onError={handleImageError}
+                      alt={user.name}
+                      className="w-8 h-8 rounded-full border border-white/50 shadow-sm object-cover"
+                    />
+                    <span className={`text-sm font-medium max-w-[100px] truncate ${textColor}`}>
+                      {user.name}
+                    </span>
+                    <ChevronDown size={14} className={textColor} />
+                  </button>
 
-                      {/* <Link to="/profile" className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-purple-50 hover:text-purple-700 transition-colors">
+                  <AnimatePresence>
+                    {isProfileOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                        className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden py-1 z-50"
+                      >
+                        <div className="px-4 py-3 border-b border-slate-100">
+                          <p className="text-sm font-semibold text-slate-800 truncate">{user.name}</p>
+                          <p className="text-xs text-slate-500 truncate">{user.email}</p>
+                        </div>
+
+                        {/* <Link to="/profile" className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-purple-50 hover:text-purple-700 transition-colors">
                         <UserIcon size={16} />
                         Profile
                       </Link> */}
 
-                      <Link
-                        to="/settings"
-                        className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-purple-50 hover:text-purple-700 transition-colors"
-                        onClick={() => setIsProfileOpen(false)}
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-                        </svg>
-                        API Key Settings
-                      </Link>
+                        <Link
+                          to="/settings"
+                          className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-purple-50 hover:text-purple-700 transition-colors"
+                          onClick={() => setIsProfileOpen(false)}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                          </svg>
+                          API Key Settings
+                        </Link>
 
-                      <div className="border-t border-slate-100 my-1"></div>
+                        <div className="border-t border-slate-100 my-1"></div>
 
 
-                      <button
-                        onClick={handleLogout}
-                        className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
-                      >
-                        <LogOut size={16} />
-                        Sign out
-                      </button>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+                        <button
+                          onClick={handleLogout}
+                          className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                        >
+                          <LogOut size={16} />
+                          Sign out
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </>
             ) : (
               <>
                 <Link

@@ -27,6 +27,9 @@ func CreateVoice(c *fiber.Ctx, repo *repository.VoiceRepository) error {
 		VoiceName: body.VoiceName,
 		VoiceURL:  body.VoiceURL,
 		RefText:   body.RefText,
+		Gender:    body.Gender,
+		AgeRange:  body.AgeRange,
+		Language:  body.Language,
 		UserID:    uid,
 	}
 

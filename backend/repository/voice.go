@@ -13,6 +13,9 @@ type Voice struct {
 	VoiceName string     `gorm:"not null" json:"voice_name"`
 	VoiceURL  string     `gorm:"not null" json:"voice_url"`
 	RefText   string     `json:"ref_text"`
+	Gender    string     `json:"gender"`    // "male" | "female"
+	AgeRange  string     `json:"age_range"` // "child" | "youth" | "adult" | "middle-aged" | "older"
+	Language  string     `json:"language"`  // e.g., "en", "th", "ja"
 	UserID    uuid.UUID  `gorm:"type:uuid;not null" json:"user_id"`
 	CreatedAt time.Time  `gorm:"default:now()" json:"created_at"`
 	UpdatedAt *time.Time `json:"updated_at"`
