@@ -107,9 +107,14 @@ const Navbar = () => {
               className={`w-8 h-8 rounded-md object-cover ${logoColor}`}
               alt="Logo"
             />
-            <span className={`text-xl font-bold tracking-tight ${logoColor} group-hover:text-purple-600 transition-colors`}>
-              MANJU
-            </span>
+            <div className="flex flex-col">
+              <span className={`text-xl font-bold tracking-tight ${logoColor} group-hover:text-purple-600 transition-colors leading-none`}>
+                MANJU
+              </span>
+              <span className={`text-[10px] font-medium tracking-[0.2em] ${logoColor} opacity-70 uppercase leading-none mt-1`}>
+                Powered by LIMITLESS
+              </span>
+            </div>
           </Link>
 
           <ul className="hidden md:flex items-center gap-8">
