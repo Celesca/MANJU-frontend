@@ -6,7 +6,8 @@ import {
     Mic,
     ChevronLeft,
     ChevronRight,
-    LayoutDashboard
+    LayoutDashboard,
+    Sparkles
 } from 'lucide-react';
 
 interface NavItem {
@@ -19,6 +20,7 @@ interface NavItem {
 const navItems: NavItem[] = [
     { name: 'Projects', href: '/console/projects', icon: FolderOpen },
     { name: 'Voices', href: '/console/voices', icon: Mic },
+    { name: 'Voice Cloning', href: '/console/voice-cloning', icon: Sparkles },
 ];
 
 export default function ConsoleSidebar() {

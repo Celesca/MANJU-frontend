@@ -8,6 +8,7 @@ import ModelConfig from "./pages/ModelConfig";
 import ProjectsContent from "./pages/ProjectsContent";
 import VoicesContent from "./pages/VoicesContent";
 import CreateVoicePage from "./pages/CreateVoicePage";
+import VoiceCloningPage from "./pages/VoiceCloningPage";
 import ConsolePage from "./pages/ConsolePage";
 import DemoPage from "./pages/DemoPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="projects" element={<ProjectsContent />} />
         <Route path="voices" element={<VoicesContent />} />
         <Route path="voices/create" element={<CreateVoicePage />} />
+        <Route path="voice-cloning" element={<VoiceCloningPage />} />
       </Route>
 
       {/* Legacy /projects route - redirect to console */}

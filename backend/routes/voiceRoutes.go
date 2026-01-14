@@ -18,4 +18,5 @@ func VoiceRoutes(app fiber.Router) {
 	router.Get("/user/:user_id", ctrl.ListVoicesByUser)
 	router.Get("/:id", ctrl.GetVoice)
 	router.Delete("/:id", ctrl.DeleteVoice)
+	router.Post("/:id/clone", ctrl.CloneVoice)
 }
