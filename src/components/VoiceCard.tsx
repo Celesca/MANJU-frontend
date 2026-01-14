@@ -79,14 +79,21 @@ export default function VoiceCard({
         togglePlayPause();
     };
 
-    const togglePlayPause = () => {
+    const togglePlayPause = async () => {
         if (!voice.voice_url || voice.voice_url === 'placeholder') {
             onPlay?.();
             return;
         }
 
+        // Construct full URL if it's a relative path
+        let audioUrl = voice.voice_url;
+        if (audioUrl.startsWith('/api/')) {
+            const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+            audioUrl = `${API_BASE}${audioUrl}`;
+        }
+
         if (!audioRef.current) {
-            audioRef.current = new Audio(voice.voice_url);
+            audioRef.current = new Audio(audioUrl);
             audioRef.current.addEventListener('ended', () => {
                 setIsPlaying(false);
                 setProgress(0);
@@ -97,15 +104,23 @@ export default function VoiceCard({
                     setProgress(prog);
                 }
             });
+            audioRef.current.addEventListener('error', (e) => {
+                console.error('Audio playback error:', e);
+                setIsPlaying(false);
+            });
         }
 
         if (isPlaying) {
             audioRef.current.pause();
             setIsPlaying(false);
         } else {
-            audioRef.current.play();
-            setIsPlaying(true);
-            onPlay?.();
+            try {
+                await audioRef.current.play();
+                setIsPlaying(true);
+                onPlay?.();
+            } catch (err) {
+                console.error('Failed to play audio:', err);
+            }
         }
     };
 
