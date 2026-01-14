@@ -102,10 +102,21 @@ export default function VoiceCloningPage() {
             return;
         }
 
+        // Check if voice has a valid audio URL
+        if (!selectedVoice.voice_url || selectedVoice.voice_url === 'placeholder') {
+            Swal.fire({
+                icon: 'error',
+                title: 'No Reference Audio',
+                text: 'This voice does not have a valid reference audio file. Please re-create the voice.'
+            });
+            return;
+        }
+
         setGenerating(true);
         setAudioUrl(null);
 
         try {
+            // Call backend clone endpoint (backend will proxy to F5-TTS API)
             const res = await apiFetch(`${API_BASE}/api/voices/${selectedVoice.id}/clone`, {
                 method: 'POST',
                 credentials: 'include',

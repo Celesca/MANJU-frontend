@@ -9,6 +9,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -31,6 +33,102 @@ func getF5TTSServiceURL() string {
 		url = "http://localhost:8000"
 	}
 	return url
+}
+
+// getVoicesStoragePath returns the base path for voice file storage
+func getVoicesStoragePath() string {
+	path := os.Getenv("VOICES_STORAGE_PATH")
+	if path == "" {
+		path = "./uploads/voices"
+	}
+	return path
+}
+
+// ensureVoiceDir creates the user-specific voice directory
+func ensureVoiceDir(userID string) (string, error) {
+	basePath := getVoicesStoragePath()
+	userPath := filepath.Join(basePath, userID)
+
+	if err := os.MkdirAll(userPath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create voice directory: %w", err)
+	}
+
+	return userPath, nil
+}
+
+// UploadVoiceFile handles voice audio file uploads
+func UploadVoiceFile(c *fiber.Ctx) error {
+	// Get user ID from context
+	userIDStr := c.Locals("userID")
+	if userIDStr == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	// Get the uploaded file
+	file, err := c.FormFile("file")
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "no file uploaded"})
+	}
+
+	// Validate file type
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	allowedExts := map[string]bool{".wav": true, ".mp3": true, ".m4a": true, ".ogg": true, ".flac": true}
+	if !allowedExts[ext] {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid file type. Allowed: wav, mp3, m4a, ogg, flac"})
+	}
+
+	// Validate file size (max 50MB)
+	if file.Size > 50*1024*1024 {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "file too large. Max size: 50MB"})
+	}
+
+	// Create user voice directory
+	voiceDir, err := ensureVoiceDir(userIDStr.(string))
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// Generate unique filename
+	fileID := uuid.New().String()
+	safeFilename := fmt.Sprintf("%s_%s%s", fileID, time.Now().Format("20060102150405"), ext)
+	filePath := filepath.Join(voiceDir, safeFilename)
+
+	// Save the file
+	if err := c.SaveFile(file, filePath); err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save file"})
+	}
+
+	// Build the URL to access the file
+	// Format: /api/voices/files/{user_id}/{filename}
+	fileURL := fmt.Sprintf("/api/voices/files/%s/%s", userIDStr.(string), safeFilename)
+
+	return c.Status(http.StatusCreated).JSON(fiber.Map{
+		"url":      fileURL,
+		"filename": safeFilename,
+		"size":     file.Size,
+	})
+}
+
+// ServeVoiceFile serves uploaded voice files
+func ServeVoiceFile(c *fiber.Ctx) error {
+	userID := c.Params("user_id")
+	filename := c.Params("filename")
+
+	if userID == "" || filename == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "missing parameters"})
+	}
+
+	// Sanitize filename to prevent path traversal
+	filename = filepath.Base(filename)
+
+	filePath := filepath.Join(getVoicesStoragePath(), userID, filename)
+
+	// Check if file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "file not found"})
+	}
+
+	return c.SendFile(filePath)
 }
 
 func CreateVoice(c *fiber.Ctx, repo *repository.VoiceRepository) error {
@@ -154,16 +252,36 @@ func CloneVoice(c *fiber.Ctx, repo *repository.VoiceRepository) error {
 		body.CfgStrength = 2.0
 	}
 
-	// Download reference audio from voice URL
-	audioResp, err := http.Get(voice.VoiceURL)
-	if err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch reference audio"})
-	}
-	defer audioResp.Body.Close()
+	// Read reference audio from local file storage
+	// Voice URL format: /api/voices/files/{user_id}/{filename}
+	var audioBytes []byte
 
-	audioBytes, err := io.ReadAll(audioResp.Body)
-	if err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to read reference audio"})
+	if strings.HasPrefix(voice.VoiceURL, "/api/voices/files/") {
+		// Local file - extract path
+		parts := strings.Split(strings.TrimPrefix(voice.VoiceURL, "/api/voices/files/"), "/")
+		if len(parts) >= 2 {
+			filePath := filepath.Join(getVoicesStoragePath(), parts[0], parts[1])
+			audioBytes, err = os.ReadFile(filePath)
+			if err != nil {
+				return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to read reference audio file"})
+			}
+		} else {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid voice URL format"})
+		}
+	} else if strings.HasPrefix(voice.VoiceURL, "http") {
+		// External URL - download it
+		audioResp, err := http.Get(voice.VoiceURL)
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch reference audio"})
+		}
+		defer audioResp.Body.Close()
+
+		audioBytes, err = io.ReadAll(audioResp.Body)
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to read reference audio"})
+		}
+	} else {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid voice URL - must be uploaded file or HTTP URL"})
 	}
 
 	// Build multipart request to F5-TTS-THAI-API
