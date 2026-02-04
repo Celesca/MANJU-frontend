@@ -127,6 +127,7 @@ export default function CreateVoicePage() {
             // Step 1: Upload the audio file to get a permanent URL
             const formData = new FormData();
             formData.append('file', file);
+            formData.append('voice_name', voiceName.trim());
 
             const uploadRes = await apiFetch(`${API_BASE}/api/voices/upload`, {
                 method: 'POST',
@@ -140,7 +141,10 @@ export default function CreateVoicePage() {
             }
 
             const uploadData = await uploadRes.json();
-            const voiceUrl = `${API_BASE}${uploadData.url}`;
+            // Azure URLs are complete, local URLs need API_BASE prefix
+            const voiceUrl = uploadData.url.startsWith('http')
+                ? uploadData.url
+                : `${API_BASE}${uploadData.url}`;
 
             // Step 2: Create the voice record with the uploaded file URL
             const res = await apiFetch(`${API_BASE}/api/voices`, {
