@@ -147,13 +147,13 @@ const AboutPage = () => {
 
               {/* Social Links */}
               <div className="flex gap-4">
-                <a href={member.socials.github} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors">
+                <a href={member.socials.github} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" aria-label="GitHub">
                   <Github size={24} />
                 </a>
-                <a href={`mailto:${member.socials.email}`} className="p-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors">
+                <a href={`mailto:${member.socials.email}`} className="p-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors" aria-label="Email">
                   <Mail size={24} />
                 </a>
-                <a href={member.socials.linkedin} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                <a href={member.socials.linkedin} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" aria-label="LinkedIn">
                   <Linkedin size={24} />
                 </a>
               </div>

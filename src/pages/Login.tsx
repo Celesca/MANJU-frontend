@@ -3,7 +3,9 @@ import Aurora from '../components/Backgound';
 import { motion } from 'framer-motion';
 import { Server, ShieldCheck } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8080';
+import { getEnv } from '../utils/env';
+
+const API_BASE = getEnv('VITE_API_URL') || 'http://127.0.0.1:8080';
 const BACKEND_LOGIN = `${API_BASE}/auth/login/google`;
 
 export default function Login() {

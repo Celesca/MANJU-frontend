@@ -8,14 +8,22 @@
 // This wrapper isolates the env access.
 
 export const getEnv = (key: string): string => {
-    // Check if import.meta.env exists (Vite)
-    if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
-      return (import.meta as any).env[key] || '';
+    let metaEnv: any = {};
+    try {
+        // Use new Function to avoid syntax error in CJS environments (Jest)
+        // when parsing the file.
+        metaEnv = new Function('return import.meta.env')();
+    } catch (e) {
+        // Ignore errors (e.g., in CJS where import.meta is not allowed)
+    }
+
+    if (metaEnv && metaEnv[key]) {
+        return metaEnv[key];
     }
   
     // Fallback to process.env (Node/Jest safe)
     if (typeof process !== 'undefined' && process.env) {
-      return process.env[key] || '';
+        return process.env[key] || '';
     }
   
     return '';
