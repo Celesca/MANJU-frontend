@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { apiFetch } from '../utils/api';
 import { authStore } from '../stores/authStore';
+import { getEnv } from '../utils/env';
 
 type User = { id: string; email: string; name?: string; picture?: string } | null;
 
@@ -16,7 +17,11 @@ export function useAuth() {
     }
 
     try {
-      const API_BASE = (import.meta.env.VITE_API_URL as string) || '';
+
+
+// ... (code)
+
+      const API_BASE = getEnv('VITE_API_URL') || '';
       const url = API_BASE ? `${API_BASE}/auth/me` : '/auth/me';
       const res = await apiFetch(url);
 

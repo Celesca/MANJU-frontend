@@ -4,9 +4,14 @@
  */
 
 import { authStore } from '../stores/authStore';
+import { getEnv } from './env';
 
 export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
-    const MANJU_API_KEY = import.meta.env.VITE_MANJU_API_KEY || '';
+
+
+// ... (code)
+
+    const MANJU_API_KEY = getEnv('VITE_MANJU_API_KEY') || '';
 
     // Build headers object - start with existing headers from options
     const headers: Record<string, string> = {};

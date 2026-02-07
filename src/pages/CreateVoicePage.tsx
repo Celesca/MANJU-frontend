@@ -13,7 +13,9 @@ import { useAuth } from '../hooks/useAuth';
 import { apiFetch } from '../utils/api';
 import Swal from 'sweetalert2';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+import { getEnv } from '../utils/env';
+
+const API_BASE = getEnv('VITE_API_URL') || 'http://localhost:8080';
 
 const ageRanges = [
     { value: 'child', label: 'Child', range: '1-17' },
