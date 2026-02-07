@@ -5,7 +5,12 @@ module.exports = {
 
   // ts-jest transform for TypeScript/TSX files
   transform: {
-    '^.+\\.(ts|tsx)$': 'ts-jest',
+    '^.+\\.(ts|tsx)$': [
+      'ts-jest',
+      {
+        tsconfig: 'tsconfig.jest.json',
+      },
+    ],
   },
 
   // Look for tests inside src/ and top-level __tests__
