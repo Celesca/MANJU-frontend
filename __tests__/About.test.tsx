@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import AboutPage from '../src/pages/About';
 import '@testing-library/jest-dom';
 
-// 1. Mock ข้อมูล JSON (สมมติข้อมูลเพื่อใช้เช็คใน test)
+// 1. Mock JSON
 jest.mock('../src/documents/Data-About.json', () => [
   {
     "id": "member-1",
@@ -22,10 +22,10 @@ jest.mock('../src/documents/Data-About.json', () => [
   }
 ]);
 
-// 2. Mock Component ภายนอก
+// 2. Mock Component
 jest.mock('../src/components/Navbar', () => () => <div data-testid="navbar">Navbar</div>);
 
-// 3. Mock รูปภาพ (เพื่อให้ Jest ไม่บ่นเรื่องหาไฟล์รูปไม่เจอ)
+// 3. Mock image
 jest.mock('../src/assets/folk.png', () => 'test-file-stub');
 jest.mock('../src/assets/otwo.jpg', () => 'test-file-stub');
 jest.mock('../src/assets/kaew.png', () => 'test-file-stub');
@@ -35,46 +35,46 @@ describe('AboutPage Component', () => {
   it('renders hero section correctly', () => {
     render(<AboutPage />);
     
-    // เช็คหัวข้อหลัก
+    // Check main title
     expect(screen.getByText(/Meet the/i)).toBeInTheDocument();
     expect(screen.getByText(/MANJU Team/i)).toBeInTheDocument();
     
-    // เช็คว่า Navbar ขึ้นไหม
+    // Check Navbar
     expect(screen.getByTestId('navbar')).toBeInTheDocument();
   });
 
   it('renders team members from JSON data', () => {
     render(<AboutPage />);
 
-    // เช็คชื่อสมาชิก (จาก Mock data) - อาจมีหลายที่ (Hero + Detail)
+    // Check member name
     expect(screen.getAllByText('Sawit').length).toBeGreaterThan(0);
     
-    // เช็ค Role
+    // Check role
     expect(screen.getAllByText('Full Stack Developer').length).toBeGreaterThan(0);
     
-    // เช็คชื่อเล่นใน Floating Badge
+    // Check Floating Badge
     expect(screen.getAllByText('Folk').length).toBeGreaterThan(0);
   });
 
   it('displays skills and achievements correctly', () => {
     render(<AboutPage />);
 
-    // เช็ค Skills
+    // Check skills
     expect(screen.getByText('React')).toBeInTheDocument();
     expect(screen.getByText('TypeScript')).toBeInTheDocument();
 
-    // เช็ค Achievements
+    // Check achievements
     expect(screen.getByText('First Place in Hackathon')).toBeInTheDocument();
   });
 
   it('has correct social links', () => {
     render(<AboutPage />);
 
-    // เช็ค GitHub Link
+    // Check GitHub Link
     const githubLink = screen.getByRole('link', { name: /github/i });
     expect(githubLink).toHaveAttribute('href', 'https://github.com');
 
-    // เช็ค Email Link
+    // Check Email Link
     const emailLink = screen.getByRole('link', { name: /mail/i });
     expect(emailLink).toHaveAttribute('href', 'mailto:test@test.com');
   });

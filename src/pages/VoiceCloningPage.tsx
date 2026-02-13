@@ -26,7 +26,9 @@ interface Voice {
     created_at: string;
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+import { getEnv } from '../utils/env';
+
+const API_BASE = getEnv('VITE_API_URL') || 'http://localhost:8080';
 
 const languageLabels: Record<string, string> = {
     en: 'English',

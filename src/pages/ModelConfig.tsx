@@ -28,7 +28,9 @@ import type {
   IfConditionData,
 } from '../types/workflow';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+import { getEnv } from '../utils/env';
+
+const API_BASE = getEnv('VITE_API_URL') || 'http://localhost:8080';
 
 export default function ModelConfig() {
   const { projectId } = useParams<{ projectId: string }>();

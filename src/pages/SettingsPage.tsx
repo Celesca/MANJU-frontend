@@ -10,7 +10,9 @@ import { useAuth } from '../hooks/useAuth';
 import { apiFetch } from '../utils/api';
 import Navbar from '../components/Navbar';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+import { getEnv } from '../utils/env';
+
+const API_BASE = getEnv('VITE_API_URL') || 'http://localhost:8080';
 
 interface SavedAPIKey {
     id: string;

@@ -37,6 +37,7 @@ const PricingSection: React.FC = () => {
             <button 
               onClick={() => setIsAnnual(!isAnnual)}
               className="relative w-14 h-8 bg-slate-200 rounded-full p-1 transition-colors duration-300 focus:outline-none hover:bg-slate-300"
+              aria-label="Toggle pricing period"
             >
               <div className={`w-6 h-6 bg-white rounded-full shadow-sm transform transition-transform duration-300 ${isAnnual ? 'translate-x-6' : 'translate-x-0'}`} />
             </button>
