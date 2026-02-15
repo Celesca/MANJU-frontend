@@ -18,8 +18,8 @@ jest.mock('../src/utils/env', () => ({
 }));
 
 // Mock URL.createObjectURL
-global.URL.createObjectURL = jest.fn(() => 'blob:http://localhost:3000/mock-url');
-global.URL.revokeObjectURL = jest.fn();
+URL.createObjectURL = jest.fn(() => 'blob:http://localhost:3000/mock-url');
+URL.revokeObjectURL = jest.fn();
 
 const mockNavigate = jest.fn();
 jest.mock('react-router-dom', () => ({
