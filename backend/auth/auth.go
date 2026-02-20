@@ -119,13 +119,16 @@ func generateState(c *fiber.Ctx) (string, error) {
 		return "", err
 	}
 	state := base64.RawURLEncoding.EncodeToString(b)
+
+	isSecure := c.Protocol() == "https" || os.Getenv("ENV") == "production" || os.Getenv("ENVIRONMENT") == "production"
+
 	// Use a simple cookie for state verification (short-lived, same-site)
 	c.Cookie(&fiber.Cookie{
 		Name:     "oauthstate",
 		Value:    state,
 		Expires:  time.Now().Add(10 * time.Minute),
 		HTTPOnly: true,
-		Secure:   true,
+		Secure:   isSecure,
 		SameSite: "Lax",
 		Path:     "/",
 	})
