@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"log"
 	"os"
 	"strings"
 
@@ -17,7 +18,7 @@ func APIKeyGuard() fiber.Handler {
 
 		// Skip for auth routes (OAuth login/callback are browser redirects)
 		path := c.Path()
-		if strings.HasPrefix(path, "/auth/") {
+		if strings.HasPrefix(path, "/auth/") || strings.HasPrefix(path, "/api/auth/") {
 			return c.Next()
 		}
 
@@ -34,6 +35,7 @@ func APIKeyGuard() fiber.Handler {
 		// log.Printf("[APIKeyGuard] Path: %s, Expected Key: %s, Received Key: %s", path, apiKey, clientKey)
 
 		if clientKey == "" || clientKey != apiKey {
+			log.Printf("[APIKeyGuard] Unauthorized access to path: %s", path)
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": "unauthorized: missing or invalid API Key",
 			})

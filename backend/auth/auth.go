@@ -126,7 +126,7 @@ func generateState(c *fiber.Ctx) (string, error) {
 	c.Cookie(&fiber.Cookie{
 		Name:     "oauthstate",
 		Value:    state,
-		Expires:  time.Now().Add(10 * time.Minute),
+		MaxAge:   10 * 60, // 10 minutes (in seconds)
 		HTTPOnly: true,
 		Secure:   isSecure,
 		SameSite: "Lax",
@@ -150,6 +150,7 @@ func Callback(c *fiber.Ctx) error {
 	state := c.Query("state")
 	cookieState := c.Cookies("oauthstate")
 	if state == "" || cookieState == "" || state != cookieState {
+		log.Printf("[OAuth Debug] URL State: %q, Cookie State: %q", state, cookieState)
 		return c.Status(fiber.StatusBadRequest).SendString("invalid oauth state")
 	}
 	code := c.Query("code")
@@ -218,7 +219,7 @@ func Callback(c *fiber.Ctx) error {
 		Name:     "oauthstate",
 		Value:    "",
 		Path:     "/",
-		Expires:  time.Now().Add(-1 * time.Hour),
+		MaxAge:   -1,
 		HTTPOnly: true,
 	})
 

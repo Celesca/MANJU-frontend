@@ -5,7 +5,7 @@ import { Server, ShieldCheck } from 'lucide-react';
 
 import { getEnv } from '../utils/env';
 
-const API_BASE = getEnv('VITE_API_URL') || 'http://127.0.0.1:8080';
+const API_BASE = getEnv('VITE_API_URL') || 'http://localhost:8080';
 const BACKEND_LOGIN = `${API_BASE}/auth/login/google`;
 
 export default function Login() {
