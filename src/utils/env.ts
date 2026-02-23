@@ -8,23 +8,21 @@
 // This wrapper isolates the env access.
 
 export const getEnv = (key: string): string => {
-    let metaEnv: any = {};
+    // Prefer direct access to import.meta.env so Vite can statically replace
+    // environment variables at build/dev time. This will work in the browser
+    // and during Vite dev where `import.meta.env` is available.
     try {
-        // Use new Function to avoid syntax error in CJS environments (Jest)
-        // when parsing the file.
-        metaEnv = new Function('return import.meta.env')();
+        // @ts-ignore - import.meta exists in ESM/Vite environments
+        const meta = (import.meta as any)?.env;
+        if (meta && meta[key]) return meta[key];
     } catch (e) {
-        // Ignore errors (e.g., in CJS where import.meta is not allowed)
+        // ignore and fall through to process.env fallback
     }
 
-    if (metaEnv && metaEnv[key]) {
-        return metaEnv[key];
-    }
-  
-    // Fallback to process.env (Node/Jest safe)
+    // Fallback for Node/Jest environments where process.env is available
     if (typeof process !== 'undefined' && process.env) {
         return process.env[key] || '';
     }
-  
+
     return '';
 };
