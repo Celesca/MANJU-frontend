@@ -72,9 +72,9 @@
 
 | Name | Role | Socials |
 | :--- | :--- | :--- |
-| **Sawit Koseeyaumporn** (Folk) | AI Engineer / MLOps | [GitHub](https://github.com/crazyfolkza) |
-| **Siratee Saiprom** (Oat) | Full-Stack Developer | [GitHub](https://github.com/SOtwoX1) |
-| **Punchaya Chancharoen** (Pang) | Frontend / UX/UI | [GitHub](https://github.com/Kaewkloaw) |
+| **Sawit Koseeyaumporn** (Folk) | AI Engineer / MLOps | [GitHub](https://github.com//Celesca) |
+| **Siratee Saiprom** (O2) | Full-Stack Developer | [GitHub](https://github.com/SOtwoX1) |
+| **Punchaya Chancharoen** (Kaewkloaw) | Frontend / UX/UI | [GitHub](https://github.com/Kaewkloaw) |
 
 ---
 *© 2025 MANJU Project. All Rights Reserved.*
