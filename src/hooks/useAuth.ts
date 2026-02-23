@@ -17,12 +17,8 @@ export function useAuth() {
     }
 
     try {
-
-
-// ... (code)
-
-      const API_BASE = getEnv('VITE_API_URL') || '';
-      const url = API_BASE ? `${API_BASE}/auth/me` : '/auth/me';
+      const API_BASE = getEnv('VITE_API_URL') || 'http://localhost:8080';
+      const url = `${API_BASE}/auth/me`;
       const res = await apiFetch(url);
 
       if (!res.ok) {
