@@ -9,7 +9,11 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Header, Depends
+import httpx
+import tempfile
+import shutil
+
+from fastapi import FastAPI, HTTPException, Header, Depends, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -29,24 +33,41 @@ logger = logging.getLogger(__name__)
 executor: Optional[WorkflowExecutor] = None
 embedding_service: Optional[DocumentEmbeddingService] = None
 openai_client: Optional[OpenAI] = None
+http_client: Optional[httpx.AsyncClient] = None
+
+# Qwen TTS service URL
+QWEN_TTS_URL = os.getenv("QWEN_TTS_URL", "http://localhost:8001")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown events."""
-    global executor, embedding_service, openai_client
+    global executor, embedding_service, openai_client, http_client
     logger.info("Starting AI Workflow Service...")
     executor = WorkflowExecutor()
     embedding_service = DocumentEmbeddingService()
+    http_client = httpx.AsyncClient(timeout=httpx.Timeout(120.0))
     
     api_key = os.getenv("OPENAI_API_KEY")
     if api_key:
         openai_client = OpenAI(api_key=api_key)
     else:
         logger.info("OPENAI_API_KEY not found in environment. Users will need to provide their own keys for TTS.")
+
+    # Pre-warm Qwen TTS model at startup (fire-and-forget health check)
+    try:
+        resp = await http_client.get(f"{QWEN_TTS_URL}/health")
+        if resp.status_code == 200:
+            logger.info("Qwen3-TTS service is reachable at %s", QWEN_TTS_URL)
+        else:
+            logger.warning("Qwen3-TTS service returned status %s", resp.status_code)
+    except Exception:
+        logger.warning("Qwen3-TTS service not reachable at %s — /talk endpoints will fail", QWEN_TTS_URL)
         
     yield
     logger.info("Shutting down AI Workflow Service...")
+    if http_client:
+        await http_client.aclose()
 
 
 async def verify_api_key(x_api_key: Optional[str] = Header(None)):
@@ -142,6 +163,7 @@ class WorkflowTypeResponse(BaseModel):
     has_rag: bool
     has_sheets: bool
     has_condition: bool
+    tts_provider: str = "openai"  # "openai" or "qwen3"
 
 
 class TTSRequest(BaseModel):
@@ -276,6 +298,326 @@ async def text_to_speech(request: TTSRequest):
     except Exception as e:
         logger.exception("Error in TTS generation")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Talk Endpoints — Workflow chat → Qwen3 TTS voice output
+# =============================================================================
+
+class TalkRequest(BaseModel):
+    """Request for /talk — runs workflow then synthesises voice via Qwen3-TTS."""
+    message: str
+    workflow: WorkflowConfig
+    conversation_history: List[Dict[str, str]] = Field(default_factory=list)
+    session_id: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    # Qwen TTS settings
+    tts_mode: str = "custom"  # "custom" | "voice-clone" | "voice-design"
+    voice_name: str = "serena"  # For custom voice mode
+    instruction: Optional[str] = None  # Style instruction for custom voice
+    voice_description: Optional[str] = None  # For voice-design mode
+    reference_voice_id: Optional[str] = None  # Cached ref voice ID for clone mode
+    use_fast_mode: bool = True
+
+
+class TalkResponse(BaseModel):
+    """Response from /talk (JSON metadata — audio is streamed separately)."""
+    text_response: str
+    model_used: Optional[str] = None
+    processing_time_ms: float
+    nodes_executed: List[str] = Field(default_factory=list)
+    audio_url: Optional[str] = None  # Relative URL to fetch audio separately
+
+
+class VoiceReferenceCache(BaseModel):
+    """Cached voice reference info."""
+    id: str
+    filename: str
+    ref_transcript: Optional[str] = None
+    created_at: str
+
+
+# In-memory voice reference cache (maps ref_id → local temp path + transcript)
+_voice_ref_cache: Dict[str, Dict[str, Any]] = {}
+
+
+@app.post("/talk")
+async def talk(request: TalkRequest):
+    """
+    Workflow chat → Qwen3-TTS voice output.
+
+    1. Executes the workflow to get the AI text response.
+    2. Sends the text to Qwen3-TTS for speech synthesis.
+    3. Returns the audio as a WAV stream.
+    """
+    if executor is None:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    if http_client is None:
+        raise HTTPException(status_code=503, detail="HTTP client not initialized")
+
+    start_time = datetime.now()
+
+    # Step 1 — Run workflow
+    try:
+        result = await executor.execute(
+            message=request.message,
+            workflow=request.workflow,
+            conversation_history=request.conversation_history,
+            session_id=request.session_id,
+            openai_api_key=request.openai_api_key,
+        )
+    except Exception as e:
+        logger.exception("Error executing workflow in /talk")
+        raise HTTPException(status_code=500, detail=f"Workflow error: {e}")
+
+    text_response = result.get("response", "")
+    if not text_response:
+        raise HTTPException(status_code=500, detail="Workflow produced no text response")
+
+    # Step 2 — Send text to Qwen3-TTS
+    try:
+        audio_bytes = await _qwen_tts_synthesize(
+            text=text_response,
+            mode=request.tts_mode,
+            voice_name=request.voice_name,
+            instruction=request.instruction,
+            voice_description=request.voice_description,
+            reference_voice_id=request.reference_voice_id,
+            use_fast_mode=request.use_fast_mode,
+        )
+    except Exception as e:
+        logger.exception("Error in Qwen3-TTS synthesis")
+        raise HTTPException(status_code=502, detail=f"TTS error: {e}")
+
+    processing_time = (datetime.now() - start_time).total_seconds() * 1000
+
+    # Return audio stream with metadata in headers
+    headers = {
+        "X-Text-Response": text_response[:500],
+        "X-Model-Used": result.get("model_used") or "",
+        "X-Processing-Time-Ms": str(round(processing_time, 2)),
+        "X-Nodes-Executed": ",".join(result.get("nodes_executed", [])),
+    }
+    return StreamingResponse(
+        iter([audio_bytes]),
+        media_type="audio/wav",
+        headers=headers,
+    )
+
+
+@app.post("/talk/text-to-voice")
+async def talk_text_to_voice(
+    text: str = Form(...),
+    tts_mode: str = Form("custom"),
+    voice_name: str = Form("serena"),
+    instruction: Optional[str] = Form(None),
+    voice_description: Optional[str] = Form(None),
+    reference_voice_id: Optional[str] = Form(None),
+    use_fast_mode: bool = Form(True),
+):
+    """
+    Simple text → Qwen3-TTS voice endpoint (no workflow execution).
+    Useful for replaying or converting arbitrary text to voice.
+    """
+    if http_client is None:
+        raise HTTPException(status_code=503, detail="HTTP client not initialized")
+
+    try:
+        audio_bytes = await _qwen_tts_synthesize(
+            text=text,
+            mode=tts_mode,
+            voice_name=voice_name,
+            instruction=instruction,
+            voice_description=voice_description,
+            reference_voice_id=reference_voice_id,
+            use_fast_mode=use_fast_mode,
+        )
+    except Exception as e:
+        logger.exception("Error in text-to-voice")
+        raise HTTPException(status_code=502, detail=str(e))
+
+    return StreamingResponse(iter([audio_bytes]), media_type="audio/wav")
+
+
+# =============================================================================
+# Voice Reference Cache Endpoints
+# =============================================================================
+
+@app.post("/voice-references/upload")
+async def upload_voice_reference(
+    file: UploadFile = File(...),
+    ref_transcript: Optional[str] = Form(None),
+):
+    """
+    Upload and cache a reference voice audio for Qwen3-TTS voice cloning.
+
+    Returns a reference ID that can be used in /talk requests.
+    """
+    import uuid as _uuid
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file uploaded")
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in {".wav", ".mp3", ".m4a", ".ogg", ".flac"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported audio format: {ext}")
+
+    ref_id = str(_uuid.uuid4())
+    cache_dir = os.path.join(tempfile.gettempdir(), "manju_voice_refs")
+    os.makedirs(cache_dir, exist_ok=True)
+
+    dest_path = os.path.join(cache_dir, f"{ref_id}{ext}")
+    with open(dest_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    _voice_ref_cache[ref_id] = {
+        "path": dest_path,
+        "filename": file.filename,
+        "ref_transcript": ref_transcript,
+        "created_at": datetime.now().isoformat(),
+    }
+
+    logger.info("Cached voice reference %s (%s)", ref_id, file.filename)
+
+    return {
+        "id": ref_id,
+        "filename": file.filename,
+        "ref_transcript": ref_transcript,
+        "created_at": _voice_ref_cache[ref_id]["created_at"],
+    }
+
+
+@app.get("/voice-references")
+async def list_voice_references():
+    """List all cached voice references."""
+    items = []
+    for ref_id, info in _voice_ref_cache.items():
+        items.append({
+            "id": ref_id,
+            "filename": info["filename"],
+            "ref_transcript": info.get("ref_transcript"),
+            "created_at": info["created_at"],
+        })
+    return items
+
+
+@app.get("/voice-references/{ref_id}")
+async def get_voice_reference(ref_id: str):
+    """Get details of a cached voice reference."""
+    if ref_id not in _voice_ref_cache:
+        raise HTTPException(status_code=404, detail="Voice reference not found")
+    info = _voice_ref_cache[ref_id]
+    return {
+        "id": ref_id,
+        "filename": info["filename"],
+        "ref_transcript": info.get("ref_transcript"),
+        "created_at": info["created_at"],
+    }
+
+
+@app.put("/voice-references/{ref_id}")
+async def update_voice_reference(ref_id: str, ref_transcript: str = Form(...)):
+    """Update the reference transcript for a cached voice reference."""
+    if ref_id not in _voice_ref_cache:
+        raise HTTPException(status_code=404, detail="Voice reference not found")
+    _voice_ref_cache[ref_id]["ref_transcript"] = ref_transcript
+    info = _voice_ref_cache[ref_id]
+    return {
+        "id": ref_id,
+        "filename": info["filename"],
+        "ref_transcript": ref_transcript,
+        "created_at": info["created_at"],
+    }
+
+
+@app.delete("/voice-references/{ref_id}")
+async def delete_voice_reference(ref_id: str):
+    """Delete a cached voice reference."""
+    if ref_id not in _voice_ref_cache:
+        raise HTTPException(status_code=404, detail="Voice reference not found")
+    info = _voice_ref_cache.pop(ref_id)
+    try:
+        os.unlink(info["path"])
+    except OSError:
+        pass
+    return {"success": True}
+
+
+# =============================================================================
+# Qwen TTS Service Health & Proxy
+# =============================================================================
+
+@app.get("/qwen-tts/health")
+async def qwen_tts_health():
+    """Health check proxy for Qwen3-TTS service."""
+    if http_client is None:
+        raise HTTPException(status_code=503, detail="HTTP client not initialized")
+    try:
+        resp = await http_client.get(f"{QWEN_TTS_URL}/health")
+        return resp.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Qwen TTS unreachable: {e}")
+
+
+async def _qwen_tts_synthesize(
+    text: str,
+    mode: str = "custom",
+    voice_name: str = "serena",
+    instruction: Optional[str] = None,
+    voice_description: Optional[str] = None,
+    reference_voice_id: Optional[str] = None,
+    use_fast_mode: bool = True,
+) -> bytes:
+    """Internal helper — call Qwen3-TTS service and return audio bytes."""
+    if http_client is None:
+        raise RuntimeError("HTTP client not initialized")
+
+    if mode == "voice-clone":
+        # Need reference audio
+        if not reference_voice_id or reference_voice_id not in _voice_ref_cache:
+            raise ValueError("Valid reference_voice_id required for voice-clone mode")
+
+        ref_info = _voice_ref_cache[reference_voice_id]
+        ref_path = ref_info["path"]
+        ref_transcript = ref_info.get("ref_transcript") or ""
+
+        with open(ref_path, "rb") as f:
+            files = {"reference_audio": (os.path.basename(ref_path), f, "audio/wav")}
+            data = {
+                "text": text,
+                "ref_transcript": ref_transcript,
+                "use_fast_mode": str(use_fast_mode).lower(),
+            }
+            resp = await http_client.post(
+                f"{QWEN_TTS_URL}/qwen-tts/voice-clone",
+                data=data,
+                files=files,
+            )
+
+    elif mode == "voice-design":
+        if not voice_description:
+            raise ValueError("voice_description required for voice-design mode")
+        resp = await http_client.post(
+            f"{QWEN_TTS_URL}/qwen-tts/voice-design",
+            json={"text": text, "voice_description": voice_description},
+        )
+
+    else:
+        # Default: custom preset voice
+        payload: Dict[str, Any] = {"text": text, "voice_name": voice_name}
+        if instruction:
+            payload["instruction"] = instruction
+        resp = await http_client.post(
+            f"{QWEN_TTS_URL}/qwen-tts/custom-voice",
+            json=payload,
+        )
+
+    if resp.status_code != 200:
+        detail = resp.text[:500]
+        raise RuntimeError(f"Qwen TTS returned {resp.status_code}: {detail}")
+
+    return resp.content
 
 
 # =============================================================================

@@ -81,6 +81,18 @@ def detect_workflow_type(nodes: List) -> Dict[str, Any]:
     # Determine workflow type
     workflow_type: WorkflowType = f"{input_type}-to-{output_type}"  # type: ignore
     
+    # Detect TTS provider from voice-output node data
+    tts_provider = "openai"
+    for n in nodes:
+        ntype = n.type if hasattr(n, 'type') else n.get('type', '')
+        if ntype == "voice-output":
+            ndata = n.data if hasattr(n, 'data') else n.get('data', {})
+            if isinstance(ndata, dict):
+                provider = ndata.get('ttsProvider', 'openai')
+                if provider:
+                    tts_provider = provider
+            break
+
     return {
         "input_type": input_type,
         "output_type": output_type,
@@ -88,6 +100,7 @@ def detect_workflow_type(nodes: List) -> Dict[str, Any]:
         "has_rag": "rag-documents" in node_types,
         "has_sheets": "google-sheets" in node_types,
         "has_condition": "if-condition" in node_types,
+        "tts_provider": tts_provider,
     }
 
 

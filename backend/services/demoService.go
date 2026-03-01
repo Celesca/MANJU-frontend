@@ -344,6 +344,7 @@ type WorkflowTypeResponse struct {
 	HasRAG       bool   `json:"has_rag"`
 	HasSheets    bool   `json:"has_sheets"`
 	HasCondition bool   `json:"has_condition"`
+	TTSProvider  string `json:"tts_provider,omitempty"` // "openai" | "qwen3"
 }
 
 // GetWorkflowType detects the workflow input/output modalities
@@ -427,6 +428,19 @@ func GetWorkflowType(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 			outputType = "voice"
 		}
 
+		// Detect TTS provider from voice-output node data
+		ttsProvider := "openai"
+		for _, node := range nodes {
+			if t, ok := node["type"].(string); ok && t == "voice-output" {
+				if data, ok := node["data"].(map[string]interface{}); ok {
+					if provider, ok := data["ttsProvider"].(string); ok && provider != "" {
+						ttsProvider = provider
+					}
+				}
+				break
+			}
+		}
+
 		return c.JSON(WorkflowTypeResponse{
 			InputType:    inputType,
 			OutputType:   outputType,
@@ -434,6 +448,7 @@ func GetWorkflowType(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 			HasRAG:       contains(nodeTypes, "rag-documents"),
 			HasSheets:    contains(nodeTypes, "google-sheets"),
 			HasCondition: contains(nodeTypes, "if-condition"),
+			TTSProvider:  ttsProvider,
 		})
 	}
 	defer resp.Body.Close()

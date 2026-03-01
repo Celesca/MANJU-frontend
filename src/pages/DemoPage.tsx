@@ -44,6 +44,7 @@ interface WorkflowType {
   has_rag: boolean;
   has_sheets: boolean;
   has_condition: boolean;
+  tts_provider?: 'openai' | 'qwen3';
 }
 
 export default function DemoPage() {
@@ -182,42 +183,66 @@ export default function DemoPage() {
         content: msg.content,
       }));
 
-      // For voice workflows, we could send the audio blob
-      // For now, we'll send the transcription
-      const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/demo`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          message: mockTranscription,
-          conversation_history: conversationHistory,
-          session_id: projectId,
-          is_voice_input: true,
-        }),
-      });
+      const isQwen3Voice =
+        workflowType?.output_type === 'voice' && workflowType?.tts_provider === 'qwen3';
 
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to get response');
-      }
+      if (isQwen3Voice) {
+        // Qwen3 TTS path
+        const result = await speakResponseQwen(mockTranscription, conversationHistory);
+        if (!result) {
+          throw new Error('Failed to get voice response from Qwen3 TTS');
+        }
 
-      const data = await res.json();
+        const assistantMessage: Message = {
+          id: `msg-${Date.now()}-assistant`,
+          role: 'assistant',
+          content: result.textResponse || '[Voice response]',
+          timestamp: new Date(),
+          model_used: result.modelUsed,
+          processing_time_ms: result.processingTimeMs,
+          nodes_executed: result.nodesExecuted,
+        };
 
-      const assistantMessage: Message = {
-        id: `msg-${Date.now()}-assistant`,
-        role: 'assistant',
-        content: data.response,
-        timestamp: new Date(),
-        model_used: data.model_used,
-        processing_time_ms: data.processing_time_ms,
-        nodes_executed: data.nodes_executed,
-      };
+        setMessages(prev => [...prev, assistantMessage]);
+        setPlayingAudioId(assistantMessage.id);
+      } else {
+        // Standard OpenAI TTS path
+        const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/demo`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            message: mockTranscription,
+            conversation_history: conversationHistory,
+            session_id: projectId,
+            is_voice_input: true,
+          }),
+        });
 
-      setMessages(prev => [...prev, assistantMessage]);
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(errorData.error || 'Failed to get response');
+        }
 
-      // If voice output, play the audio
-      if (workflowType?.output_type === 'voice') {
-        speakResponse(data.response);
+        const data = await res.json();
+
+        const assistantMessage: Message = {
+          id: `msg-${Date.now()}-assistant`,
+          role: 'assistant',
+          content: data.response,
+          timestamp: new Date(),
+          model_used: data.model_used,
+          processing_time_ms: data.processing_time_ms,
+          nodes_executed: data.nodes_executed,
+        };
+
+        setMessages(prev => [...prev, assistantMessage]);
+
+        // If voice output, play the audio
+        if (workflowType?.output_type === 'voice') {
+          setPlayingAudioId(assistantMessage.id);
+          speakResponse(data.response, assistantMessage.id);
+        }
       }
 
     } catch (err) {
@@ -445,7 +470,7 @@ export default function DemoPage() {
   }, [mediaRecorder, isRecording, isRecognizing, stopVADMonitoring]);
 
   // Text-to-speech for voice output using backend OpenAI TTS
-  const speakResponse = async (text: string) => {
+  const speakResponse = async (text: string, messageId?: string) => {
     try {
       // Cancel any ongoing audio
       if (audioRef.current) {
@@ -473,6 +498,8 @@ export default function DemoPage() {
       const audio = new Audio(url);
       audioRef.current = audio;
 
+      if (messageId) setPlayingAudioId(messageId);
+
       audio.onended = () => {
         setPlayingAudioId(null);
         URL.revokeObjectURL(url);
@@ -483,6 +510,64 @@ export default function DemoPage() {
       console.error('TTS error:', err);
       setPlayingAudioId(null);
       // Fallback to browser TTS if desired, or just show error
+    }
+  };
+
+  // Qwen3 TTS: call /talk endpoint which runs workflow + TTS, returns audio stream
+  const speakResponseQwen = async (
+    message: string,
+    conversationHistory: { role: string; content: string }[],
+  ): Promise<{ textResponse: string; modelUsed?: string; processingTimeMs?: number; nodesExecuted?: string[] } | null> => {
+    try {
+      // Cancel any ongoing audio
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+
+      const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/talk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          message,
+          conversation_history: conversationHistory,
+          session_id: projectId,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to get voice response');
+      }
+
+      // Extract metadata from headers
+      const textResponse = decodeURIComponent(res.headers.get('X-Text-Response') || '');
+      const modelUsed = res.headers.get('X-Model-Used') || undefined;
+      const processingTimeMs = res.headers.get('X-Processing-Time-Ms')
+        ? parseFloat(res.headers.get('X-Processing-Time-Ms')!)
+        : undefined;
+      const nodesExecutedRaw = res.headers.get('X-Nodes-Executed') || '';
+      const nodesExecuted = nodesExecutedRaw ? nodesExecutedRaw.split(',').map(s => s.trim()) : undefined;
+
+      // Play audio from blob
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+
+      audio.onended = () => {
+        setPlayingAudioId(null);
+        URL.revokeObjectURL(url);
+      };
+
+      await audio.play();
+
+      return { textResponse, modelUsed, processingTimeMs, nodesExecuted };
+    } catch (err) {
+      console.error('Qwen TTS error:', err);
+      setPlayingAudioId(null);
+      return null;
     }
   };
 
@@ -516,39 +601,66 @@ export default function DemoPage() {
         content: msg.content,
       }));
 
-      const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/demo`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          message: userMessage.content,
-          conversation_history: conversationHistory,
-          session_id: projectId,
-        }),
-      });
+      const isQwen3Voice =
+        workflowType?.output_type === 'voice' && workflowType?.tts_provider === 'qwen3';
 
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to get response');
-      }
+      if (isQwen3Voice) {
+        // ---- Qwen3 TTS path: single /talk call returns audio + text metadata ----
+        const result = await speakResponseQwen(userMessage.content, conversationHistory);
 
-      const data = await res.json();
+        if (!result) {
+          throw new Error('Failed to get voice response from Qwen3 TTS');
+        }
 
-      const assistantMessage: Message = {
-        id: `msg-${Date.now()}-assistant`,
-        role: 'assistant',
-        content: data.response,
-        timestamp: new Date(),
-        model_used: data.model_used,
-        processing_time_ms: data.processing_time_ms,
-        nodes_executed: data.nodes_executed,
-      };
+        const assistantMessage: Message = {
+          id: `msg-${Date.now()}-assistant`,
+          role: 'assistant',
+          content: result.textResponse || '[Voice response]',
+          timestamp: new Date(),
+          model_used: result.modelUsed,
+          processing_time_ms: result.processingTimeMs,
+          nodes_executed: result.nodesExecuted,
+        };
 
-      setMessages(prev => [...prev, assistantMessage]);
+        setMessages(prev => [...prev, assistantMessage]);
+        setPlayingAudioId(assistantMessage.id);
+      } else {
+        // ---- Standard path: /demo for text, then optionally OpenAI TTS ----
+        const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/demo`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            message: userMessage.content,
+            conversation_history: conversationHistory,
+            session_id: projectId,
+          }),
+        });
 
-      // If voice output workflow, automatically speak the response
-      if (workflowType?.output_type === 'voice') {
-        speakResponse(data.response);
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(errorData.error || 'Failed to get response');
+        }
+
+        const data = await res.json();
+
+        const assistantMessage: Message = {
+          id: `msg-${Date.now()}-assistant`,
+          role: 'assistant',
+          content: data.response,
+          timestamp: new Date(),
+          model_used: data.model_used,
+          processing_time_ms: data.processing_time_ms,
+          nodes_executed: data.nodes_executed,
+        };
+
+        setMessages(prev => [...prev, assistantMessage]);
+
+        // If voice output workflow (OpenAI TTS), automatically speak the response
+        if (workflowType?.output_type === 'voice') {
+          setPlayingAudioId(assistantMessage.id);
+          speakResponse(data.response, assistantMessage.id);
+        }
       }
 
     } catch (err) {
@@ -712,7 +824,39 @@ export default function DemoPage() {
                               stopSpeaking();
                             } else {
                               setPlayingAudioId(message.id);
-                              speakResponse(message.content);
+                              if (workflowType?.tts_provider === 'qwen3') {
+                                // Re-synthesize with Qwen3 (direct text-to-voice, no workflow re-run)
+                                (async () => {
+                                  try {
+                                    if (audioRef.current) {
+                                      audioRef.current.pause();
+                                      audioRef.current = null;
+                                    }
+                                    const formData = new FormData();
+                                    formData.append('text', message.content);
+                                    const res = await apiFetch(`${API_BASE}/api/qwen-tts/text-to-voice`, {
+                                      method: 'POST',
+                                      credentials: 'include',
+                                      body: formData,
+                                    });
+                                    if (!res.ok) throw new Error('Qwen3 TTS failed');
+                                    const blob = await res.blob();
+                                    const url = URL.createObjectURL(blob);
+                                    const audio = new Audio(url);
+                                    audioRef.current = audio;
+                                    audio.onended = () => {
+                                      setPlayingAudioId(null);
+                                      URL.revokeObjectURL(url);
+                                    };
+                                    await audio.play();
+                                  } catch (err) {
+                                    console.error('Qwen3 replay error:', err);
+                                    setPlayingAudioId(null);
+                                  }
+                                })();
+                              } else {
+                                speakResponse(message.content, message.id);
+                              }
                             }
                           }}
                           className="flex items-center gap-1 text-xs text-purple-600 hover:text-purple-800 transition-colors"
@@ -812,7 +956,9 @@ export default function DemoPage() {
                 ? 'bg-green-100 text-green-700'
                 : 'bg-gray-100 text-gray-600'
                 }`}>
-                {workflowType.output_type === 'voice' ? '🔊 Voice Output' : '💬 Text Output'}
+                {workflowType.output_type === 'voice'
+                  ? `🔊 Voice Output (${workflowType.tts_provider === 'qwen3' ? 'Qwen3' : 'OpenAI'})`
+                  : '💬 Text Output'}
               </span>
             </div>
           )}

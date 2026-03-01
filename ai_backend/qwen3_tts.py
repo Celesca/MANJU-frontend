@@ -3,8 +3,10 @@ import logging
 import gc
 import time
 import tempfile
+import shutil
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, Dict, Any
+from datetime import datetime
 
 import torch
 import soundfile as sf
@@ -29,6 +31,12 @@ logger = logging.getLogger(__name__)
 
 current_model = None
 current_model_type = None
+
+# Voice reference cache: ref_id → {path, filename, ref_transcript, created_at}
+_voice_ref_cache: Dict[str, Dict[str, Any]] = {}
+
+# Default model to preload at startup (set via env var, e.g. "custom", "base", "design")
+DEFAULT_PRELOAD_MODEL = os.getenv("QWEN_TTS_PRELOAD_MODEL", "custom")
 
 # Enable PyTorch optimizations
 torch.backends.cudnn.benchmark = True
@@ -238,6 +246,16 @@ async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown events."""
     gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N/A"
     logger.info(f"Starting Qwen3-TTS Service... GPU: {gpu_name}")
+
+    # Preload default model at startup so first request is fast
+    if DEFAULT_PRELOAD_MODEL:
+        logger.info(f"Preloading '{DEFAULT_PRELOAD_MODEL}' model at startup...")
+        model = load_model(DEFAULT_PRELOAD_MODEL)
+        if model is not None:
+            logger.info(f"✅ Model '{DEFAULT_PRELOAD_MODEL}' preloaded successfully")
+        else:
+            logger.warning(f"⚠️ Failed to preload model '{DEFAULT_PRELOAD_MODEL}'")
+
     yield
     # Cleanup on shutdown
     global current_model
@@ -245,6 +263,13 @@ async def lifespan(app: FastAPI):
         del current_model
         gc.collect()
         torch.cuda.empty_cache()
+    # Clean up cached voice reference files
+    for ref_id, info in _voice_ref_cache.items():
+        try:
+            os.unlink(info["path"])
+        except OSError:
+            pass
+    _voice_ref_cache.clear()
     logger.info("Qwen3-TTS Service shut down.")
 
 
@@ -442,6 +467,149 @@ async def voice_design_endpoint(request: VoiceDesignRequest):
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.exception("Error in voice design")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Voice Reference Cache Endpoints
+# =============================================================================
+
+@app.post("/voice-references/upload")
+async def upload_voice_reference(
+    file: UploadFile = File(...),
+    ref_transcript: Optional[str] = Form(None),
+):
+    """
+    Upload and cache a reference voice audio for voice cloning.
+    Returns a reference ID that can be re-used across multiple TTS requests.
+    """
+    import uuid as _uuid
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file uploaded")
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in {".wav", ".mp3", ".m4a", ".ogg", ".flac"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported audio format: {ext}")
+
+    ref_id = str(_uuid.uuid4())
+    cache_dir = os.path.join(tempfile.gettempdir(), "qwen_voice_refs")
+    os.makedirs(cache_dir, exist_ok=True)
+
+    dest_path = os.path.join(cache_dir, f"{ref_id}{ext}")
+    content = await file.read()
+    with open(dest_path, "wb") as f:
+        f.write(content)
+
+    _voice_ref_cache[ref_id] = {
+        "path": dest_path,
+        "filename": file.filename,
+        "ref_transcript": ref_transcript,
+        "created_at": datetime.now().isoformat(),
+    }
+
+    logger.info("Cached voice reference %s (%s, %d bytes)", ref_id, file.filename, len(content))
+
+    return {
+        "id": ref_id,
+        "filename": file.filename,
+        "ref_transcript": ref_transcript,
+        "created_at": _voice_ref_cache[ref_id]["created_at"],
+    }
+
+
+@app.get("/voice-references")
+async def list_voice_references():
+    """List all cached voice references."""
+    return [
+        {
+            "id": ref_id,
+            "filename": info["filename"],
+            "ref_transcript": info.get("ref_transcript"),
+            "created_at": info["created_at"],
+        }
+        for ref_id, info in _voice_ref_cache.items()
+    ]
+
+
+@app.get("/voice-references/{ref_id}")
+async def get_voice_reference(ref_id: str):
+    """Get details of a cached voice reference."""
+    if ref_id not in _voice_ref_cache:
+        raise HTTPException(status_code=404, detail="Voice reference not found")
+    info = _voice_ref_cache[ref_id]
+    return {
+        "id": ref_id,
+        "filename": info["filename"],
+        "ref_transcript": info.get("ref_transcript"),
+        "created_at": info["created_at"],
+    }
+
+
+@app.put("/voice-references/{ref_id}")
+async def update_voice_reference(ref_id: str, ref_transcript: str = Form(...)):
+    """Update the reference transcript for a cached voice."""
+    if ref_id not in _voice_ref_cache:
+        raise HTTPException(status_code=404, detail="Voice reference not found")
+    _voice_ref_cache[ref_id]["ref_transcript"] = ref_transcript
+    info = _voice_ref_cache[ref_id]
+    return {
+        "id": ref_id,
+        "filename": info["filename"],
+        "ref_transcript": ref_transcript,
+        "created_at": info["created_at"],
+    }
+
+
+@app.delete("/voice-references/{ref_id}")
+async def delete_voice_reference(ref_id: str):
+    """Delete a cached voice reference."""
+    if ref_id not in _voice_ref_cache:
+        raise HTTPException(status_code=404, detail="Voice reference not found")
+    info = _voice_ref_cache.pop(ref_id)
+    try:
+        os.unlink(info["path"])
+    except OSError:
+        pass
+    return {"success": True}
+
+
+@app.post("/voice-references/{ref_id}/clone")
+async def clone_with_reference(
+    ref_id: str,
+    text: str = Form(...),
+    use_fast_mode: bool = Form(True),
+):
+    """
+    Generate speech using a cached voice reference (voice cloning shortcut).
+    """
+    if ref_id not in _voice_ref_cache:
+        raise HTTPException(status_code=404, detail="Voice reference not found")
+
+    info = _voice_ref_cache[ref_id]
+
+    try:
+        output_path, metrics = _voice_clone(
+            text=text,
+            reference_audio_path=info["path"],
+            ref_transcript=info.get("ref_transcript"),
+            use_fast_mode=use_fast_mode,
+        )
+        return FileResponse(
+            output_path,
+            media_type="audio/wav",
+            filename="voice_clone_output.wav",
+            headers={
+                "X-Total-Time": str(metrics["total_time"]),
+                "X-Generation-Time": str(metrics["generation_time"]),
+                "X-Audio-Duration": str(metrics["audio_duration"]),
+                "X-RTF": str(metrics["rtf"]),
+            },
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        logger.exception("Error in cached voice clone")
         raise HTTPException(status_code=500, detail=str(e))
 
 
