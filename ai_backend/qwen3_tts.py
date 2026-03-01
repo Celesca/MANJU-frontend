@@ -388,6 +388,7 @@ def _voice_design(text, voice_description):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown events."""
+    global _model_cache
     gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N/A"
     logger.info(f"Starting Qwen3-TTS Service... GPU: {gpu_name}")
 
@@ -432,7 +433,6 @@ async def lifespan(app: FastAPI):
     logger.info(f"\u2705 Service ready. Models loaded: {list(_model_cache.keys())} | GPU VRAM: {total_vram:.2f}GB")
     yield
     # Cleanup on shutdown
-    global _model_cache
     for model_type_key, model_ref in _model_cache.items():
         logger.info(f"Unloading {model_type_key} model...")
         del model_ref
