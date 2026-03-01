@@ -52,6 +52,9 @@ _voice_ref_cache: Dict[str, Dict[str, Any]] = {}
 # Default model to preload at startup (set via env var, e.g. "custom", "base", "design")
 DEFAULT_PRELOAD_MODEL = os.getenv("QWEN_TTS_PRELOAD_MODEL", "custom")
 
+# Set to "true" to preload ALL 3 models at startup (H100 80GB can hold them all)
+PRELOAD_ALL = os.getenv("QWEN_TTS_PRELOAD_ALL", "false").lower() in ("true", "1", "yes")
+
 # Enable PyTorch optimizations
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.conv.fp32_precision = 'tf32'
@@ -388,15 +391,45 @@ async def lifespan(app: FastAPI):
     gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N/A"
     logger.info(f"Starting Qwen3-TTS Service... GPU: {gpu_name}")
 
-    # Preload default model at startup so first request is fast
-    if DEFAULT_PRELOAD_MODEL:
+    # Preload models at startup so first request is fast
+    if PRELOAD_ALL:
+        logger.info("Preloading ALL models (QWEN_TTS_PRELOAD_ALL=true)...")
+        for mt in ["base", "custom", "design"]:
+            model = load_model(mt)
+            if model is not None:
+                logger.info(f"\u2705 Model '{mt}' preloaded")
+            else:
+                logger.warning(f"\u26a0\ufe0f Failed to preload '{mt}'")
+    elif DEFAULT_PRELOAD_MODEL:
         logger.info(f"Preloading '{DEFAULT_PRELOAD_MODEL}' model at startup...")
         model = load_model(DEFAULT_PRELOAD_MODEL)
         if model is not None:
-            logger.info(f"✅ Model '{DEFAULT_PRELOAD_MODEL}' preloaded successfully")
+            logger.info(f"\u2705 Model '{DEFAULT_PRELOAD_MODEL}' preloaded successfully")
         else:
-            logger.warning(f"⚠️ Failed to preload model '{DEFAULT_PRELOAD_MODEL}'")
+            logger.warning(f"\u26a0\ufe0f Failed to preload model '{DEFAULT_PRELOAD_MODEL}'")
 
+    # CUDA warmup: run a tiny dummy TTS inference to warm up CUDA kernels,
+    # cuBLAS handles, and GPU memory allocator. This eliminates the ~2-5s
+    # cold-start penalty on the very first real request.
+    if _model_cache and torch.cuda.is_available():
+        logger.info("\u26a1 Running CUDA warmup inference...")
+        warmup_start = time.time()
+        try:
+            warmup_model_type = next(iter(_model_cache))
+            warmup_model = _model_cache[warmup_model_type]
+            with torch.inference_mode():
+                if warmup_model_type == "custom":
+                    warmup_model.generate_custom_voice(text="Hello.", speaker="serena")
+                elif warmup_model_type == "design":
+                    warmup_model.generate_voice_design(text="Hello.", instruct="A calm voice.")
+                # Skip warmup for "base" (needs reference audio)
+            torch.cuda.empty_cache()
+            logger.info(f"\u26a1 Warmup done in {time.time() - warmup_start:.1f}s")
+        except Exception as e:
+            logger.warning(f"Warmup failed (non-fatal): {e}")
+
+    total_vram = torch.cuda.memory_allocated(0) / 1024**3 if torch.cuda.is_available() else 0
+    logger.info(f"\u2705 Service ready. Models loaded: {list(_model_cache.keys())} | GPU VRAM: {total_vram:.2f}GB")
     yield
     # Cleanup on shutdown
     global _model_cache

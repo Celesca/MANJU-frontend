@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -216,7 +217,14 @@ func Talk(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 
 	aiURL := getQwenTTSServiceURL() + "/talk"
 	log.Printf("[DEBUG] Calling AI /talk at: %s", aiURL)
-	client := &http.Client{Timeout: 180 * time.Second}
+
+	// Use transport-level timeouts so the body stream is NOT killed mid-read.
+	// Client.Timeout covers the ENTIRE request lifecycle including body reading;
+	// for streaming responses that can take minutes, we only want a header timeout.
+	transport := &http.Transport{
+		ResponseHeaderTimeout: 180 * time.Second,
+	}
+	client := &http.Client{Transport: transport}
 
 	req, err := http.NewRequest("POST", aiURL, bytes.NewBuffer(reqBody))
 	if err != nil {
@@ -239,12 +247,38 @@ func Talk(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 
 	// Forward metadata headers
 	c.Set("Content-Type", "audio/wav")
+	c.Set("Transfer-Encoding", "chunked")
 	c.Set("X-Text-Response", resp.Header.Get("X-Text-Response"))
 	c.Set("X-Model-Used", resp.Header.Get("X-Model-Used"))
 	c.Set("X-Processing-Time-Ms", resp.Header.Get("X-Processing-Time-Ms"))
 	c.Set("X-Nodes-Executed", resp.Header.Get("X-Nodes-Executed"))
 
-	return c.SendStream(resp.Body)
+	// TRUE streaming: flush each chunk to the client immediately as it arrives
+	// from the AI backend, instead of buffering the entire response first.
+	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+		defer resp.Body.Close()
+		buf := make([]byte, 32768) // 32 KB chunks
+		for {
+			n, readErr := resp.Body.Read(buf)
+			if n > 0 {
+				if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+					log.Printf("[WARN] /talk stream write error: %v", writeErr)
+					return
+				}
+				if flushErr := w.Flush(); flushErr != nil {
+					log.Printf("[WARN] /talk stream flush error: %v", flushErr)
+					return
+				}
+			}
+			if readErr != nil {
+				if readErr != io.EOF {
+					log.Printf("[WARN] /talk stream read error: %v", readErr)
+				}
+				return
+			}
+		}
+	})
+	return nil
 }
 
 // =============================================================================
@@ -282,7 +316,12 @@ func TextToVoice(c *fiber.Ctx) error {
 	writer.Close()
 
 	aiURL := getQwenTTSServiceURL() + "/talk/text-to-voice"
-	client := &http.Client{Timeout: 120 * time.Second}
+
+	// Transport-level timeout only — don't kill the body stream
+	transport := &http.Transport{
+		ResponseHeaderTimeout: 180 * time.Second,
+	}
+	client := &http.Client{Transport: transport}
 
 	req, err := http.NewRequest("POST", aiURL, &buf)
 	if err != nil {
@@ -303,7 +342,28 @@ func TextToVoice(c *fiber.Ctx) error {
 	}
 
 	c.Set("Content-Type", "audio/wav")
-	return c.SendStream(resp.Body)
+	c.Set("Transfer-Encoding", "chunked")
+
+	// TRUE streaming: flush each chunk immediately
+	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+		defer resp.Body.Close()
+		buf := make([]byte, 32768)
+		for {
+			n, readErr := resp.Body.Read(buf)
+			if n > 0 {
+				if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+					return
+				}
+				if flushErr := w.Flush(); flushErr != nil {
+					return
+				}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	})
+	return nil
 }
 
 // =============================================================================
