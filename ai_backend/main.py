@@ -12,6 +12,7 @@ from datetime import datetime
 import httpx
 import tempfile
 import shutil
+from urllib.parse import quote as url_quote
 
 from fastapi import FastAPI, HTTPException, Header, Depends, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
@@ -393,7 +394,7 @@ async def talk(request: TalkRequest):
 
     # Return audio stream with metadata in headers
     headers = {
-        "X-Text-Response": text_response[:500],
+        "X-Text-Response": url_quote(text_response[:500]),
         "X-Model-Used": result.get("model_used") or "",
         "X-Processing-Time-Ms": str(round(processing_time, 2)),
         "X-Nodes-Executed": ",".join(result.get("nodes_executed", [])),
