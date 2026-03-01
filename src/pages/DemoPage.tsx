@@ -550,7 +550,97 @@ export default function DemoPage() {
       const nodesExecutedRaw = res.headers.get('X-Nodes-Executed') || '';
       const nodesExecuted = nodesExecutedRaw ? nodesExecutedRaw.split(',').map(s => s.trim()) : undefined;
 
-      // Play audio from blob
+      // ---------- Progressive streaming playback via Web Audio API ----------
+      // The backend streams WAV data (header + PCM chunks per sentence).
+      // We parse the WAV header, then schedule PCM chunks for playback as
+      // they arrive — the user hears the first sentence while subsequent
+      // sentences are still being generated on the GPU.
+      if (res.body) {
+        try {
+          const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+          const audioCtx = new AudioCtxClass();
+          // Store so stopSpeaking can close it
+          audioContextRef.current = audioCtx;
+
+          const reader = res.body.getReader();
+          let headerParsed = false;
+          let sampleRate = 24000;
+          let scheduledEnd = audioCtx.currentTime + 0.05; // tiny lead-in
+          let leftover = new Uint8Array(0);
+
+          // Read and schedule audio chunks
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            // Merge with leftover from previous iteration
+            let data: Uint8Array;
+            if (leftover.length > 0) {
+              data = new Uint8Array(leftover.length + value.length);
+              data.set(leftover);
+              data.set(value, leftover.length);
+              leftover = new Uint8Array(0);
+            } else {
+              data = value;
+            }
+
+            // Parse 44-byte WAV header on first chunk
+            if (!headerParsed) {
+              if (data.length < 44) {
+                leftover = data;
+                continue;
+              }
+              const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+              sampleRate = view.getUint32(24, true);
+              headerParsed = true;
+              data = data.slice(44);
+            }
+
+            // Ensure even byte count (int16 = 2 bytes per sample)
+            if (data.length % 2 !== 0) {
+              leftover = data.slice(-1);
+              data = data.slice(0, -1);
+            }
+            if (data.length === 0) continue;
+
+            // Convert int16 PCM → float32 AudioBuffer and schedule playback
+            const samples = data.length / 2;
+            const buf = audioCtx.createBuffer(1, samples, sampleRate);
+            const ch = buf.getChannelData(0);
+            const pcmView = new DataView(data.buffer, data.byteOffset, data.byteLength);
+            for (let i = 0; i < samples; i++) {
+              ch[i] = pcmView.getInt16(i * 2, true) / 32768.0;
+            }
+            const src = audioCtx.createBufferSource();
+            src.buffer = buf;
+            src.connect(audioCtx.destination);
+            src.start(scheduledEnd);
+            scheduledEnd += samples / sampleRate;
+          }
+
+          // Fire onEnd when all scheduled audio finishes
+          const remaining = scheduledEnd - audioCtx.currentTime;
+          if (remaining > 0) {
+            setTimeout(() => {
+              setPlayingAudioId(null);
+              try { audioCtx.close(); } catch { /* ignore */ }
+              audioContextRef.current = null;
+            }, remaining * 1000);
+          } else {
+            setPlayingAudioId(null);
+            try { audioCtx.close(); } catch { /* ignore */ }
+            audioContextRef.current = null;
+          }
+
+          return { textResponse, modelUsed, processingTimeMs, nodesExecuted };
+        } catch (streamErr) {
+          console.warn('Streaming playback failed, falling back to blob', streamErr);
+          // Fall through to blob playback below
+        }
+      }
+
+      // ---------- Fallback: standard blob playback ----------
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
@@ -575,6 +665,11 @@ export default function DemoPage() {
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;
+    }
+    // Also stop streaming Web Audio playback
+    if (audioContextRef.current) {
+      try { audioContextRef.current.close(); } catch { /* ignore */ }
+      audioContextRef.current = null;
     }
     setPlayingAudioId(null);
   };

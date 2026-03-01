@@ -11,12 +11,25 @@ from datetime import datetime
 import torch
 import soundfile as sf
 from fastapi import FastAPI, HTTPException, Header, Depends, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from qwen_tts import Qwen3TTSModel
+
+import re
+import struct
+import asyncio
+import numpy as np
+
+# Thai text support (optional — install pythainlp for Thai sentence splitting)
+try:
+    from pythainlp.tokenize import sent_tokenize as _thai_sent_tokenize
+    from pythainlp.util import isthai as _isthai
+    _HAS_PYTHAINLP = True
+except ImportError:
+    _HAS_PYTHAINLP = False
 
 # Load environment variables
 load_dotenv()
@@ -29,8 +42,9 @@ logger = logging.getLogger(__name__)
 # Global State
 # =============================================================================
 
-current_model = None
-current_model_type = None
+# Multi-model cache: keep loaded models in GPU memory to avoid reload latency.
+# H100 (80GB) can hold all three 1.7B models (~3.4 GB each) simultaneously.
+_model_cache: Dict[str, Any] = {}
 
 # Voice reference cache: ref_id → {path, filename, ref_transcript, created_at}
 _voice_ref_cache: Dict[str, Dict[str, Any]] = {}
@@ -49,54 +63,144 @@ torch.backends.cuda.matmul.fp32_precision = 'tf32'
 # =============================================================================
 
 def load_model(model_type):
-    """Load model with SDPA optimization"""
-    global current_model, current_model_type
+    """Load model with Flash Attention 2 (H100/A100) and multi-model cache.
 
-    if current_model_type == model_type:
+    Models are kept in GPU memory so switching between voice-clone (base),
+    custom-voice, and voice-design no longer requires a full reload.
+    """
+    global _model_cache
+
+    if model_type in _model_cache:
         logger.info(f"✅ Using cached {model_type} model")
-        return current_model
+        return _model_cache[model_type]
 
-    if current_model is not None:
-        logger.info(f"Unloading {current_model_type} model...")
-        del current_model
-        gc.collect()
-        torch.cuda.empty_cache()
+    model_names = {
+        "base": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+        "custom": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+        "design": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    }
+    if model_type not in model_names:
+        raise ValueError(f"Unknown model type: {model_type}")
 
     logger.info(f"Loading {model_type} model (1.7B)...")
     start = time.time()
 
-    try:
-        if model_type == "base":
-            model_name = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
-        elif model_type == "custom":
-            model_name = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
-        elif model_type == "design":
-            model_name = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+    # Try Flash Attention 2 first (best on H100/A100), then fall back to SDPA
+    attempts = [
+        ("flash_attention_2", torch.bfloat16),
+        ("sdpa", torch.float16),
+    ]
+    for attn_impl, dtype in attempts:
+        try:
+            model = Qwen3TTSModel.from_pretrained(
+                model_names[model_type],
+                torch_dtype=dtype,
+                device_map="cuda:0",
+                attn_implementation=attn_impl,
+            )
+            _model_cache[model_type] = model
+            load_time = time.time() - start
+            allocated = torch.cuda.memory_allocated(0) / 1024**3
+            logger.info(
+                f"✅ Loaded {model_type} ({attn_impl}, {dtype}) "
+                f"in {load_time:.1f}s | GPU: {allocated:.2f}GB"
+            )
+            return model
+        except Exception as e:
+            if attn_impl == "flash_attention_2":
+                logger.warning(f"Flash Attention 2 not available ({e}), trying SDPA...")
+                continue
+            logger.exception(f"❌ Error loading model: {str(e)}")
+            return None
+
+    return None
+
+
+# =============================================================================
+# Text Splitting for Sentence-Level TTS
+# =============================================================================
+
+def _is_thai_text(text: str) -> bool:
+    """Check if text is predominantly Thai."""
+    if not _HAS_PYTHAINLP:
+        return False
+    thai_chars = sum(1 for c in text if _isthai(c))
+    return (thai_chars / max(len(text), 1)) > 0.3
+
+
+def split_text_for_tts(text: str, max_chunk_chars: int = 200, min_chunk_chars: int = 20) -> list:
+    """Split text into sentence-level chunks optimised for TTS generation.
+
+    * For Thai text uses PyThaiNLP sentence tokeniser.
+    * For other languages splits on sentence-ending punctuation.
+    * Very short sentences are merged to avoid tiny audio fragments.
+    """
+    text = text.strip()
+    if not text:
+        return [text]
+    if len(text) <= max_chunk_chars:
+        return [text]
+
+    # Sentence splitting
+    if _is_thai_text(text):
+        sentences = _thai_sent_tokenize(text)
+    else:
+        # Split on sentence-ending punctuation followed by whitespace or end
+        sentences = re.split(r'(?<=[.!?\u3002\uff01\uff1f;\n])\s*', text)
+
+    sentences = [s.strip() for s in sentences if s.strip()]
+    if not sentences:
+        return [text]
+
+    # Merge short sentences into larger chunks
+    chunks: list[str] = []
+    current = ""
+    for sent in sentences:
+        if current and len(current) + len(sent) + 1 > max_chunk_chars:
+            chunks.append(current)
+            current = sent
         else:
-            raise ValueError(f"Unknown model type: {model_type}")
+            current = (current + " " + sent).strip() if current else sent
+    if current:
+        chunks.append(current)
 
-        current_model = Qwen3TTSModel.from_pretrained(
-            model_name,
-            torch_dtype=torch.float16,
-            device_map="cuda:0",
-            attn_implementation="sdpa"
-        )
+    return chunks if chunks else [text]
 
-        current_model_type = model_type
-        load_time = time.time() - start
 
-        allocated = torch.cuda.memory_allocated(0) / 1024**3
-        logger.info(f"✅ Loaded in {load_time:.1f}s | GPU: {allocated:.2f}GB")
+# =============================================================================
+# Audio Conversion Helpers (for streaming)
+# =============================================================================
 
-        return current_model
+def _audio_to_pcm16(audio_array) -> bytes:
+    """Convert audio numpy/torch array to int16 PCM bytes."""
+    if isinstance(audio_array, torch.Tensor):
+        audio_array = audio_array.cpu().numpy()
+    audio = np.asarray(audio_array, dtype=np.float64)
+    peak = np.abs(audio).max()
+    if peak > 1.0:
+        audio = audio / peak
+    return (audio * 32767).clip(-32768, 32767).astype(np.int16).tobytes()
 
-    except Exception as e:
-        logger.exception(f"❌ Error loading model: {str(e)}")
-        return None
+
+def _make_wav_header(sample_rate: int, num_channels: int = 1, bits_per_sample: int = 16) -> bytes:
+    """Create a WAV header with max data length (for streaming unknown-length audio)."""
+    max_data = 0x7FFFFFFF - 36
+    byte_rate = sample_rate * num_channels * bits_per_sample // 8
+    block_align = num_channels * bits_per_sample // 8
+    return (
+        struct.pack('<4sI4s', b'RIFF', max_data + 36, b'WAVE')
+        + struct.pack('<4sIHHIIHH', b'fmt ', 16, 1, num_channels,
+                      sample_rate, byte_rate, block_align, bits_per_sample)
+        + struct.pack('<4sI', b'data', max_data)
+    )
 
 
 def _voice_clone(text, reference_audio_path, ref_transcript, use_fast_mode):
-    """Generate speech by cloning a reference voice"""
+    """Generate speech by cloning a reference voice.
+
+    Long text is automatically split into sentences and generated per-chunk
+    for faster processing. Audio chunks are concatenated before returning.
+    """
     total_start = time.time()
     model = load_model("base")
     if model is None:
@@ -120,22 +224,33 @@ def _voice_clone(text, reference_audio_path, ref_transcript, use_fast_mode):
     prompt_time = time.time() - prompt_start
     logger.info(f"   Prompt: {prompt_time:.1f}s")
 
-    logger.info("⏱️ Generating audio...")
+    chunks = split_text_for_tts(text)
+    logger.info(f"⏱️ Generating audio ({len(chunks)} chunk(s))...")
     gen_start = time.time()
 
+    all_audio = []
+    sr = None
+
     with torch.inference_mode():
-        wavs, sr = model.generate_voice_clone(
-            text=text,
-            voice_clone_prompt=prompt_items
-        )
+        for i, chunk_text in enumerate(chunks):
+            if len(chunks) > 1:
+                logger.info(f"   Chunk {i+1}/{len(chunks)}: {chunk_text[:60]}...")
+            wavs, chunk_sr = model.generate_voice_clone(
+                text=chunk_text,
+                voice_clone_prompt=prompt_items
+            )
+            all_audio.append(wavs[0])
+            sr = chunk_sr
 
     gen_time = time.time() - gen_start
 
+    combined = np.concatenate(all_audio) if len(all_audio) > 1 else all_audio[0]
+
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-    sf.write(temp_file.name, wavs[0], sr)
+    sf.write(temp_file.name, combined, sr)
 
     total_time = time.time() - total_start
-    audio_duration = len(wavs[0]) / sr
+    audio_duration = len(combined) / sr
     rtf = gen_time / audio_duration
 
     logger.info(f"✅ Done! Total: {total_time:.1f}s | Gen: {gen_time:.1f}s | Audio: {audio_duration:.1f}s | RTF: {rtf:.2f}x")
@@ -148,11 +263,12 @@ def _voice_clone(text, reference_audio_path, ref_transcript, use_fast_mode):
         "generation_time": round(gen_time, 2),
         "audio_duration": round(audio_duration, 2),
         "rtf": round(rtf, 2),
+        "chunks": len(chunks),
     }
 
 
 def _custom_voice(text, voice_name, instruction):
-    """Generate speech using preset voices"""
+    """Generate speech using preset voices with sentence-level chunking."""
     total_start = time.time()
     model = load_model("custom")
     if model is None:
@@ -162,28 +278,40 @@ def _custom_voice(text, voice_name, instruction):
     if instruction and instruction.strip():
         logger.info(f"   Style instruction: '{instruction}'")
 
+    chunks = split_text_for_tts(text)
+    logger.info(f"   Chunks: {len(chunks)}")
     gen_start = time.time()
 
+    all_audio = []
+    sr = None
+
     with torch.inference_mode():
-        if instruction and instruction.strip():
-            wavs, sr = model.generate_custom_voice(
-                text=text,
-                speaker=voice_name,
-                instruct=instruction
-            )
-        else:
-            wavs, sr = model.generate_custom_voice(
-                text=text,
-                speaker=voice_name
-            )
+        for i, chunk_text in enumerate(chunks):
+            if len(chunks) > 1:
+                logger.info(f"   Chunk {i+1}/{len(chunks)}: {chunk_text[:60]}...")
+            if instruction and instruction.strip():
+                wavs, chunk_sr = model.generate_custom_voice(
+                    text=chunk_text,
+                    speaker=voice_name,
+                    instruct=instruction
+                )
+            else:
+                wavs, chunk_sr = model.generate_custom_voice(
+                    text=chunk_text,
+                    speaker=voice_name
+                )
+            all_audio.append(wavs[0])
+            sr = chunk_sr
 
     gen_time = time.time() - gen_start
 
+    combined = np.concatenate(all_audio) if len(all_audio) > 1 else all_audio[0]
+
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-    sf.write(temp_file.name, wavs[0], sr)
+    sf.write(temp_file.name, combined, sr)
 
     total_time = time.time() - total_start
-    audio_duration = len(wavs[0]) / sr
+    audio_duration = len(combined) / sr
     rtf = gen_time / audio_duration
 
     logger.info(f"✅ Done! Total: {total_time:.1f}s | Gen: {gen_time:.1f}s | Audio: {audio_duration:.1f}s | RTF: {rtf:.2f}x")
@@ -196,32 +324,44 @@ def _custom_voice(text, voice_name, instruction):
         "generation_time": round(gen_time, 2),
         "audio_duration": round(audio_duration, 2),
         "rtf": round(rtf, 2),
+        "chunks": len(chunks),
     }
 
 
 def _voice_design(text, voice_description):
-    """Generate speech from text description"""
+    """Generate speech from text description with sentence-level chunking."""
     total_start = time.time()
     model = load_model("design")
     if model is None:
         raise RuntimeError("Failed to load voice design model")
 
-    logger.info("⏱️ Generating...")
+    chunks = split_text_for_tts(text)
+    logger.info(f"⏱️ Generating ({len(chunks)} chunk(s))...")
     gen_start = time.time()
 
+    all_audio = []
+    sr = None
+
     with torch.inference_mode():
-        wavs, sr = model.generate_voice_design(
-            text=text,
-            instruct=voice_description
-        )
+        for i, chunk_text in enumerate(chunks):
+            if len(chunks) > 1:
+                logger.info(f"   Chunk {i+1}/{len(chunks)}: {chunk_text[:60]}...")
+            wavs, chunk_sr = model.generate_voice_design(
+                text=chunk_text,
+                instruct=voice_description
+            )
+            all_audio.append(wavs[0])
+            sr = chunk_sr
 
     gen_time = time.time() - gen_start
 
+    combined = np.concatenate(all_audio) if len(all_audio) > 1 else all_audio[0]
+
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-    sf.write(temp_file.name, wavs[0], sr)
+    sf.write(temp_file.name, combined, sr)
 
     total_time = time.time() - total_start
-    audio_duration = len(wavs[0]) / sr
+    audio_duration = len(combined) / sr
     rtf = gen_time / audio_duration
 
     logger.info(f"✅ Done! Total: {total_time:.1f}s | Gen: {gen_time:.1f}s | Audio: {audio_duration:.1f}s | RTF: {rtf:.2f}x")
@@ -234,6 +374,7 @@ def _voice_design(text, voice_description):
         "generation_time": round(gen_time, 2),
         "audio_duration": round(audio_duration, 2),
         "rtf": round(rtf, 2),
+        "chunks": len(chunks),
     }
 
 
@@ -258,11 +399,13 @@ async def lifespan(app: FastAPI):
 
     yield
     # Cleanup on shutdown
-    global current_model
-    if current_model is not None:
-        del current_model
-        gc.collect()
-        torch.cuda.empty_cache()
+    global _model_cache
+    for model_type_key, model_ref in _model_cache.items():
+        logger.info(f"Unloading {model_type_key} model...")
+        del model_ref
+    _model_cache.clear()
+    gc.collect()
+    torch.cuda.empty_cache()
     # Clean up cached voice reference files
     for ref_id, info in _voice_ref_cache.items():
         try:
@@ -336,7 +479,7 @@ async def health_check():
         "gpu_available": gpu_available,
         "gpu_name": torch.cuda.get_device_name(0) if gpu_available else None,
         "gpu_memory_gb": round(torch.cuda.memory_allocated(0) / 1024**3, 2) if gpu_available else None,
-        "current_model_loaded": current_model_type,
+        "current_model_loaded": list(_model_cache.keys()),
         "available_voices": AVAILABLE_VOICES,
     }
 
@@ -611,6 +754,169 @@ async def clone_with_reference(
     except Exception as e:
         logger.exception("Error in cached voice clone")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Streaming TTS Endpoints — progressive audio delivery
+# =============================================================================
+
+@app.post("/qwen-tts/stream/voice-clone")
+async def stream_voice_clone(
+    text: str = Form(...),
+    reference_audio: UploadFile = File(...),
+    ref_transcript: Optional[str] = Form(None),
+    use_fast_mode: bool = Form(True),
+):
+    """Streaming voice clone — splits text into sentences, generates audio per
+    sentence, and streams a WAV file progressively (WAV header + PCM chunks).
+
+    The client receives audio data for the first sentence as soon as it is
+    generated, before subsequent sentences are processed.
+    """
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    model = load_model("base")
+    if model is None:
+        raise HTTPException(status_code=503, detail="Failed to load base model")
+
+    # Save uploaded reference to temp file
+    ext = os.path.splitext(reference_audio.filename or ".wav")[1]
+    ref_temp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+    try:
+        content = await reference_audio.read()
+        ref_temp.write(content)
+        ref_temp.close()
+    except Exception:
+        try:
+            os.unlink(ref_temp.name)
+        except OSError:
+            pass
+        raise
+
+    # Pre-compute voice clone prompt once (reused across all chunks)
+    if use_fast_mode or not ref_transcript:
+        prompt_items = model.create_voice_clone_prompt(
+            ref_audio=ref_temp.name, x_vector_only_mode=True)
+    else:
+        prompt_items = model.create_voice_clone_prompt(
+            ref_audio=ref_temp.name, ref_text=ref_transcript, x_vector_only_mode=False)
+
+    chunks = split_text_for_tts(text)
+    logger.info(f"Stream voice-clone: {len(chunks)} chunks, {len(text)} chars total")
+
+    def generate():
+        """Sync generator: WAV header + PCM int16 data per sentence chunk."""
+        try:
+            header_sent = False
+            for i, chunk_text in enumerate(chunks):
+                logger.info(f"  Stream chunk {i+1}/{len(chunks)}: {chunk_text[:50]}...")
+                start = time.time()
+                with torch.inference_mode():
+                    wavs, sr = model.generate_voice_clone(
+                        text=chunk_text, voice_clone_prompt=prompt_items)
+                gen_t = time.time() - start
+                logger.info(f"  Chunk {i+1} generated in {gen_t:.1f}s")
+
+                pcm = _audio_to_pcm16(wavs[0])
+                if not header_sent:
+                    yield _make_wav_header(sr)
+                    header_sent = True
+                yield pcm
+                torch.cuda.empty_cache()
+        finally:
+            try:
+                os.unlink(ref_temp.name)
+            except OSError:
+                pass
+            gc.collect()
+            torch.cuda.empty_cache()
+
+    return StreamingResponse(generate(), media_type="audio/wav")
+
+
+@app.post("/qwen-tts/stream/custom-voice")
+async def stream_custom_voice(request: CustomVoiceRequest):
+    """Streaming custom voice — sentence-level generation with progressive WAV."""
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="Text is required")
+    if request.voice_name not in AVAILABLE_VOICES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid voice '{request.voice_name}'. Available: {AVAILABLE_VOICES}",
+        )
+
+    model = load_model("custom")
+    if model is None:
+        raise HTTPException(status_code=503, detail="Failed to load model")
+
+    chunks = split_text_for_tts(request.text)
+    voice_name = request.voice_name
+    instruction = request.instruction
+    logger.info(f"Stream custom-voice ({voice_name}): {len(chunks)} chunks")
+
+    def generate():
+        header_sent = False
+        for i, chunk_text in enumerate(chunks):
+            logger.info(f"  Stream chunk {i+1}/{len(chunks)}: {chunk_text[:50]}...")
+            start = time.time()
+            with torch.inference_mode():
+                if instruction and instruction.strip():
+                    wavs, sr = model.generate_custom_voice(
+                        text=chunk_text, speaker=voice_name, instruct=instruction)
+                else:
+                    wavs, sr = model.generate_custom_voice(
+                        text=chunk_text, speaker=voice_name)
+            gen_t = time.time() - start
+            logger.info(f"  Chunk {i+1} generated in {gen_t:.1f}s")
+
+            pcm = _audio_to_pcm16(wavs[0])
+            if not header_sent:
+                yield _make_wav_header(sr)
+                header_sent = True
+            yield pcm
+            torch.cuda.empty_cache()
+        gc.collect()
+
+    return StreamingResponse(generate(), media_type="audio/wav")
+
+
+@app.post("/qwen-tts/stream/voice-design")
+async def stream_voice_design(request: VoiceDesignRequest):
+    """Streaming voice design — sentence-level generation with progressive WAV."""
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="Text is required")
+    if not request.voice_description.strip():
+        raise HTTPException(status_code=400, detail="Voice description is required")
+
+    model = load_model("design")
+    if model is None:
+        raise HTTPException(status_code=503, detail="Failed to load model")
+
+    chunks = split_text_for_tts(request.text)
+    voice_description = request.voice_description
+    logger.info(f"Stream voice-design: {len(chunks)} chunks")
+
+    def generate():
+        header_sent = False
+        for i, chunk_text in enumerate(chunks):
+            logger.info(f"  Stream chunk {i+1}/{len(chunks)}: {chunk_text[:50]}...")
+            start = time.time()
+            with torch.inference_mode():
+                wavs, sr = model.generate_voice_design(
+                    text=chunk_text, instruct=voice_description)
+            gen_t = time.time() - start
+            logger.info(f"  Chunk {i+1} generated in {gen_t:.1f}s")
+
+            pcm = _audio_to_pcm16(wavs[0])
+            if not header_sent:
+                yield _make_wav_header(sr)
+                header_sent = True
+            yield pcm
+            torch.cuda.empty_cache()
+        gc.collect()
+
+    return StreamingResponse(generate(), media_type="audio/wav")
 
 
 # =============================================================================

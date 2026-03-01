@@ -345,11 +345,13 @@ _voice_ref_cache: Dict[str, Dict[str, Any]] = {}
 @app.post("/talk")
 async def talk(request: TalkRequest):
     """
-    Workflow chat → Qwen3-TTS voice output.
+    Workflow chat → Qwen3-TTS voice output (streaming).
 
     1. Executes the workflow to get the AI text response.
-    2. Sends the text to Qwen3-TTS for speech synthesis.
-    3. Returns the audio as a WAV stream.
+    2. Streams the text to Qwen3-TTS for sentence-level speech synthesis.
+    3. Forwards the audio as a progressive WAV stream — the client receives
+       the first sentence's audio while subsequent sentences are still being
+       generated on the GPU.
     """
     if executor is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
@@ -375,21 +377,6 @@ async def talk(request: TalkRequest):
     if not text_response:
         raise HTTPException(status_code=500, detail="Workflow produced no text response")
 
-    # Step 2 — Send text to Qwen3-TTS
-    try:
-        audio_bytes = await _qwen_tts_synthesize(
-            text=text_response,
-            mode=request.tts_mode,
-            voice_name=request.voice_name,
-            instruction=request.instruction,
-            voice_description=request.voice_description,
-            reference_voice_id=request.reference_voice_id,
-            use_fast_mode=request.use_fast_mode,
-        )
-    except Exception as e:
-        logger.exception("Error in Qwen3-TTS synthesis")
-        raise HTTPException(status_code=502, detail=f"TTS error: {e}")
-
     processing_time = (datetime.now() - start_time).total_seconds() * 1000
 
     # Return audio stream with metadata in headers
@@ -399,8 +386,22 @@ async def talk(request: TalkRequest):
         "X-Processing-Time-Ms": str(round(processing_time, 2)),
         "X-Nodes-Executed": ",".join(result.get("nodes_executed", [])),
     }
+
+    # Step 2 — Stream audio from Qwen3-TTS (sentence-level progressive delivery)
+    async def stream_audio():
+        async for chunk in _qwen_tts_synthesize_stream(
+            text=text_response,
+            mode=request.tts_mode,
+            voice_name=request.voice_name,
+            instruction=request.instruction,
+            voice_description=request.voice_description,
+            reference_voice_id=request.reference_voice_id,
+            use_fast_mode=request.use_fast_mode,
+        ):
+            yield chunk
+
     return StreamingResponse(
-        iter([audio_bytes]),
+        stream_audio(),
         media_type="audio/wav",
         headers=headers,
     )
@@ -619,6 +620,127 @@ async def _qwen_tts_synthesize(
         raise RuntimeError(f"Qwen TTS returned {resp.status_code}: {detail}")
 
     return resp.content
+
+
+async def _qwen_tts_synthesize_stream(
+    text: str,
+    mode: str = "custom",
+    voice_name: str = "serena",
+    instruction: Optional[str] = None,
+    voice_description: Optional[str] = None,
+    reference_voice_id: Optional[str] = None,
+    use_fast_mode: bool = True,
+):
+    """Async generator — stream audio chunks from Qwen3-TTS streaming endpoints.
+
+    Yields bytes as they arrive from the TTS service, enabling progressive
+    audio delivery to the client (first sentence plays while rest generates).
+    Falls back to the non-streaming endpoint if the /stream/ endpoint is
+    unavailable (404).
+    """
+    if http_client is None:
+        raise RuntimeError("HTTP client not initialized")
+
+    if mode == "voice-clone":
+        if not reference_voice_id or reference_voice_id not in _voice_ref_cache:
+            raise ValueError("Valid reference_voice_id required for voice-clone mode")
+
+        ref_info = _voice_ref_cache[reference_voice_id]
+        ref_path = ref_info["path"]
+        ref_transcript = ref_info.get("ref_transcript") or ""
+
+        # Read reference audio into memory (small file) to avoid file-handle issues
+        ref_content = open(ref_path, "rb").read()
+        files = {"reference_audio": (os.path.basename(ref_path), ref_content, "audio/wav")}
+        data = {
+            "text": text,
+            "ref_transcript": ref_transcript,
+            "use_fast_mode": str(use_fast_mode).lower(),
+        }
+
+        try:
+            async with http_client.stream(
+                "POST",
+                f"{QWEN_TTS_URL}/qwen-tts/stream/voice-clone",
+                data=data,
+                files=files,
+                timeout=httpx.Timeout(300.0),
+            ) as resp:
+                if resp.status_code == 404:
+                    # Streaming endpoint not available — fall back
+                    logger.warning("Streaming endpoint not found, falling back to non-streaming")
+                    audio = await _qwen_tts_synthesize(
+                        text, mode, voice_name, instruction,
+                        voice_description, reference_voice_id, use_fast_mode)
+                    yield audio
+                    return
+                if resp.status_code != 200:
+                    content = await resp.aread()
+                    raise RuntimeError(f"Qwen TTS returned {resp.status_code}: {content[:500]}")
+                async for chunk in resp.aiter_bytes(chunk_size=16384):
+                    yield chunk
+        except httpx.ConnectError:
+            logger.warning("TTS stream connection failed, falling back")
+            audio = await _qwen_tts_synthesize(
+                text, mode, voice_name, instruction,
+                voice_description, reference_voice_id, use_fast_mode)
+            yield audio
+
+    elif mode == "voice-design":
+        if not voice_description:
+            raise ValueError("voice_description required for voice-design mode")
+        try:
+            async with http_client.stream(
+                "POST",
+                f"{QWEN_TTS_URL}/qwen-tts/stream/voice-design",
+                json={"text": text, "voice_description": voice_description},
+                timeout=httpx.Timeout(300.0),
+            ) as resp:
+                if resp.status_code == 404:
+                    audio = await _qwen_tts_synthesize(
+                        text, mode, voice_name, instruction,
+                        voice_description, reference_voice_id, use_fast_mode)
+                    yield audio
+                    return
+                if resp.status_code != 200:
+                    content = await resp.aread()
+                    raise RuntimeError(f"Qwen TTS returned {resp.status_code}: {content[:500]}")
+                async for chunk in resp.aiter_bytes(chunk_size=16384):
+                    yield chunk
+        except httpx.ConnectError:
+            audio = await _qwen_tts_synthesize(
+                text, mode, voice_name, instruction,
+                voice_description, reference_voice_id, use_fast_mode)
+            yield audio
+
+    else:
+        # Default: custom preset voice
+        payload: Dict[str, Any] = {"text": text, "voice_name": voice_name}
+        if instruction:
+            payload["instruction"] = instruction
+        try:
+            async with http_client.stream(
+                "POST",
+                f"{QWEN_TTS_URL}/qwen-tts/stream/custom-voice",
+                json=payload,
+                timeout=httpx.Timeout(300.0),
+            ) as resp:
+                if resp.status_code == 404:
+                    audio = await _qwen_tts_synthesize(
+                        text, mode, voice_name, instruction,
+                        voice_description, reference_voice_id, use_fast_mode)
+                    yield audio
+                    return
+                if resp.status_code != 200:
+                    content = await resp.aread()
+                    raise RuntimeError(f"Qwen TTS returned {resp.status_code}: {content[:500]}")
+                async for chunk in resp.aiter_bytes(chunk_size=16384):
+                    yield chunk
+        except httpx.ConnectError:
+            audio = await _qwen_tts_synthesize(
+                text, mode, voice_name, instruction,
+                voice_description, reference_voice_id, use_fast_mode)
+            yield audio
 
 
 # =============================================================================
