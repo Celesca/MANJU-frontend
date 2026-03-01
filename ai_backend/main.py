@@ -9,6 +9,8 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
+import hashlib
+import re
 import httpx
 import tempfile
 import shutil
@@ -302,6 +304,67 @@ async def text_to_speech(request: TTSRequest):
 
 
 # =============================================================================
+# Text splitting for sentence-level TTS pipeline
+# =============================================================================
+
+# Try to import PyThaiNLP for Thai sentence splitting
+try:
+    from pythainlp.tokenize import sent_tokenize as _thai_sent_tokenize
+    from pythainlp.util import isthai as _isthai
+    _HAS_PYTHAINLP = True
+except ImportError:
+    _HAS_PYTHAINLP = False
+
+def _contains_thai(text: str) -> bool:
+    """Check if text contains Thai characters."""
+    if _HAS_PYTHAINLP:
+        return any(_isthai(ch) for ch in text if ch.strip())
+    return any('\u0e00' <= ch <= '\u0e7f' for ch in text)
+
+def split_text_for_tts(text: str, max_chars: int = 200) -> List[str]:
+    """Split text into sentence chunks for TTS pipeline.
+
+    Uses PyThaiNLP for Thai text, regex for others.
+    Merges short sentences into chunks of roughly *max_chars*.
+    """
+    text = text.strip()
+    if not text:
+        return []
+
+    # --- sentence-level split ---
+    if _contains_thai(text) and _HAS_PYTHAINLP:
+        raw_sentences = _thai_sent_tokenize(text)
+    else:
+        raw_sentences = re.split(r'(?<=[.!?\u0e2f\u0e46])\s*', text)
+
+    raw_sentences = [s.strip() for s in raw_sentences if s.strip()]
+
+    if not raw_sentences:
+        return [text]
+
+    # --- merge short sentences into ~max_chars chunks ---
+    chunks: List[str] = []
+    current = ""
+    for sent in raw_sentences:
+        if current and len(current) + len(sent) + 1 > max_chars:
+            chunks.append(current)
+            current = sent
+        else:
+            current = f"{current} {sent}".strip() if current else sent
+    if current:
+        chunks.append(current)
+
+    return chunks if chunks else [text]
+
+def _make_cache_key(text: str, tts_mode: str, voice_name: str,
+                    instruction: Optional[str] = None,
+                    voice_description: Optional[str] = None) -> str:
+    """Generate a deterministic cache key for a TTS request."""
+    raw = f"{text}|{tts_mode}|{voice_name}|{instruction or ''}|{voice_description or ''}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:24]
+
+
+# =============================================================================
 # Talk Endpoints — Workflow chat → Qwen3 TTS voice output
 # =============================================================================
 
@@ -345,13 +408,11 @@ _voice_ref_cache: Dict[str, Dict[str, Any]] = {}
 @app.post("/talk")
 async def talk(request: TalkRequest):
     """
-    Workflow chat → Qwen3-TTS voice output (streaming).
+    Workflow chat → JSON response with text + sentence chunks.
 
-    1. Executes the workflow to get the AI text response.
-    2. Streams the text to Qwen3-TTS for sentence-level speech synthesis.
-    3. Forwards the audio as a progressive WAV stream — the client receives
-       the first sentence's audio while subsequent sentences are still being
-       generated on the GPU.
+    Returns the AI text, pre-split sentences for the client-side TTS pipeline,
+    and a cache key for audio caching.  The client then calls /tts-sentence
+    for each chunk individually, enabling play-while-generating.
     """
     if executor is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
@@ -379,32 +440,71 @@ async def talk(request: TalkRequest):
 
     processing_time = (datetime.now() - start_time).total_seconds() * 1000
 
-    # Return audio stream with metadata in headers
-    headers = {
-        "X-Text-Response": url_quote(text_response[:500]),
-        "X-Model-Used": result.get("model_used") or "",
-        "X-Processing-Time-Ms": str(round(processing_time, 2)),
-        "X-Nodes-Executed": ",".join(result.get("nodes_executed", [])),
+    # Step 2 — Split text into sentence chunks for client-side TTS pipeline
+    sentences = split_text_for_tts(text_response, max_chars=200)
+
+    # Step 3 — Generate cache key
+    cache_key = _make_cache_key(
+        text_response, request.tts_mode, request.voice_name,
+        request.instruction, request.voice_description,
+    )
+
+    return {
+        "text_response": text_response,
+        "sentences": sentences,
+        "cache_key": cache_key,
+        "model_used": result.get("model_used") or "",
+        "processing_time_ms": round(processing_time, 2),
+        "nodes_executed": result.get("nodes_executed", []),
+        "tts_settings": {
+            "tts_mode": request.tts_mode,
+            "voice_name": request.voice_name,
+            "instruction": request.instruction,
+            "voice_description": request.voice_description,
+            "reference_voice_id": request.reference_voice_id,
+            "use_fast_mode": request.use_fast_mode,
+        },
     }
 
-    # Step 2 — Stream audio from Qwen3-TTS (sentence-level progressive delivery)
-    async def stream_audio():
-        async for chunk in _qwen_tts_synthesize_stream(
-            text=text_response,
+
+class TTSSentenceRequest(BaseModel):
+    """Request for /tts-sentence — synthesise a single sentence chunk."""
+    text: str
+    tts_mode: str = "custom"
+    voice_name: str = "serena"
+    instruction: Optional[str] = None
+    voice_description: Optional[str] = None
+    reference_voice_id: Optional[str] = None
+    use_fast_mode: bool = True
+
+
+@app.post("/tts-sentence")
+async def tts_sentence(request: TTSSentenceRequest):
+    """
+    Synthesise a single sentence chunk via Qwen3-TTS.
+
+    Returns a complete WAV file (not streamed). Designed to be called
+    once per sentence from the client-side pipeline so that sentence 1
+    plays while sentence 2 is being synthesised.
+    """
+    if http_client is None:
+        raise HTTPException(status_code=503, detail="HTTP client not initialized")
+
+    try:
+        audio_bytes = await _qwen_tts_synthesize(
+            text=request.text,
             mode=request.tts_mode,
             voice_name=request.voice_name,
             instruction=request.instruction,
             voice_description=request.voice_description,
             reference_voice_id=request.reference_voice_id,
             use_fast_mode=request.use_fast_mode,
-        ):
-            yield chunk
+        )
+    except Exception as e:
+        logger.exception("Error in /tts-sentence")
+        raise HTTPException(status_code=502, detail=str(e))
 
-    return StreamingResponse(
-        stream_audio(),
-        media_type="audio/wav",
-        headers=headers,
-    )
+    return StreamingResponse(iter([audio_bytes]), media_type="audio/wav")
 
 
 @app.post("/talk/text-to-voice")

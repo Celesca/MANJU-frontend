@@ -238,47 +238,67 @@ func Talk(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		log.Printf("[ERROR] AI /talk call failed: %v", err)
 		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": "AI service unavailable"})
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
 		return c.Status(resp.StatusCode).JSON(fiber.Map{"error": "AI /talk error: " + string(bodyBytes)})
 	}
 
-	// Forward metadata headers
-	c.Set("Content-Type", "audio/wav")
-	c.Set("Transfer-Encoding", "chunked")
-	c.Set("X-Text-Response", resp.Header.Get("X-Text-Response"))
-	c.Set("X-Model-Used", resp.Header.Get("X-Model-Used"))
-	c.Set("X-Processing-Time-Ms", resp.Header.Get("X-Processing-Time-Ms"))
-	c.Set("X-Nodes-Executed", resp.Header.Get("X-Nodes-Executed"))
+	// /talk now returns JSON (text + sentences + cache_key + metadata).
+	// Simply proxy the JSON body through.
+	c.Set("Content-Type", "application/json")
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return c.Status(http.StatusBadGateway).JSON(fiber.Map{"error": "failed to read AI response"})
+	}
+	return c.Send(bodyBytes)
+}
 
-	// TRUE streaming: flush each chunk to the client immediately as it arrives
-	// from the AI backend, instead of buffering the entire response first.
-	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
-		defer resp.Body.Close()
-		buf := make([]byte, 32768) // 32 KB chunks
-		for {
-			n, readErr := resp.Body.Read(buf)
-			if n > 0 {
-				if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-					log.Printf("[WARN] /talk stream write error: %v", writeErr)
-					return
-				}
-				if flushErr := w.Flush(); flushErr != nil {
-					log.Printf("[WARN] /talk stream flush error: %v", flushErr)
-					return
-				}
-			}
-			if readErr != nil {
-				if readErr != io.EOF {
-					log.Printf("[WARN] /talk stream read error: %v", readErr)
-				}
-				return
-			}
-		}
-	})
-	return nil
+// =============================================================================
+// TTS Sentence — Single sentence → Qwen TTS (complete WAV, no streaming)
+// =============================================================================
+
+// TTSSentence proxies a single sentence TTS request to the AI backend.
+// Called by the frontend pipeline: one call per sentence chunk.
+func TTSSentence(c *fiber.Ctx) error {
+	userIDStr := c.Locals("userID")
+	if userIDStr == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	aiURL := getQwenTTSServiceURL() + "/tts-sentence"
+
+	transport := &http.Transport{
+		ResponseHeaderTimeout: 180 * time.Second,
+	}
+	client := &http.Client{Transport: transport}
+
+	req, err := http.NewRequest("POST", aiURL, bytes.NewReader(c.Body()))
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create request"})
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", os.Getenv("MANJU_API_KEY"))
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": "AI TTS service unavailable"})
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return c.Status(resp.StatusCode).JSON(fiber.Map{"error": string(bodyBytes)})
+	}
+
+	c.Set("Content-Type", "audio/wav")
+
+	audioBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return c.Status(http.StatusBadGateway).JSON(fiber.Map{"error": "failed to read TTS audio"})
+	}
+	return c.Send(audioBytes)
 }
 
 // =============================================================================

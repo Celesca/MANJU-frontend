@@ -27,6 +27,11 @@ func (ctrl *QwenTTSController) TextToVoice(c *fiber.Ctx) error {
 	return services.TextToVoice(c)
 }
 
+// TTSSentence handles POST /qwen-tts/tts-sentence
+func (ctrl *QwenTTSController) TTSSentence(c *fiber.Ctx) error {
+	return services.TTSSentence(c)
+}
+
 // UploadVoiceReference handles POST /qwen-tts/voice-references/upload
 func (ctrl *QwenTTSController) UploadVoiceReference(c *fiber.Ctx) error {
 	return services.UploadVoiceReference(c)

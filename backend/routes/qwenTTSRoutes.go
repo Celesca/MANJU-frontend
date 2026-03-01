@@ -21,6 +21,7 @@ func QwenTTSRoutes(app fiber.Router) {
 	qwen := app.Group("/qwen-tts")
 	qwen.Get("/health", ctrl.QwenTTSHealth)
 	qwen.Post("/text-to-voice", ctrl.TextToVoice)
+	qwen.Post("/tts-sentence", ctrl.TTSSentence)
 
 	// Voice reference cache CRUD
 	refs := qwen.Group("/voice-references")
