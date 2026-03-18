@@ -183,6 +183,7 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Key", os.Getenv("MANJU_API_KEY"))
 
+	t0 := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("[ERROR] AI service call failed: %v", err)
@@ -216,6 +217,10 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	if err := json.Unmarshal(responseBody, &aiResponse); err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to parse AI response"})
 	}
+
+	roundTripMs := float64(time.Since(t0).Milliseconds())
+	log.Printf("[MANJU_TIMING] /demo project=%s round_trip_ms=%.1f ai_processing_ms=%.1f model=%s nodes=%v",
+		projectID, roundTripMs, aiResponse.ProcessingTimeMs, aiResponse.ModelUsed, aiResponse.NodesExecuted)
 
 	return c.JSON(aiResponse)
 }

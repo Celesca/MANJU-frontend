@@ -133,6 +133,11 @@ class WorkflowState(TypedDict):
     # User-provided API key
     openai_api_key: Optional[str]
 
+    # Per-component timing (milliseconds)
+    t_ret_ms: Optional[float]    # RAG retrieval: embed query + FAISS search
+    t_llm_ms: Optional[float]    # LLM total generation time
+    t_ttft_ms: Optional[float]   # Time-to-first-token from LLM
+
 
 # =============================================================================
 # Document Loading Helpers
@@ -433,15 +438,30 @@ class NodeProcessors:
         # Generate response
         if llm:
             try:
-                response = llm.invoke(messages)
-                state["response"] = response.content
+                _t_llm_start = datetime.now()
+                _ttft_ms: Optional[float] = None
+                _chunks = []
+                for _i, _chunk in enumerate(llm.stream(messages)):
+                    if _i == 0:
+                        _ttft_ms = (datetime.now() - _t_llm_start).total_seconds() * 1000
+                    if hasattr(_chunk, "content"):
+                        _chunks.append(_chunk.content)
+                state["response"] = "".join(_chunks)
                 state["model_used"] = model_name
-                
+                state["t_llm_ms"] = (datetime.now() - _t_llm_start).total_seconds() * 1000
+                state["t_ttft_ms"] = _ttft_ms
+                logger.info(
+                    "MANJU_TIMING llm t_llm_ms=%.1f t_ttft_ms=%s model=%s",
+                    state["t_llm_ms"],
+                    f"{_ttft_ms:.1f}" if _ttft_ms is not None else "N/A",
+                    model_name,
+                )
+
                 # Store output in variable if name specified (for use in conditions)
                 if output_variable_name:
-                    state["output_variables"][output_variable_name] = response.content
+                    state["output_variables"][output_variable_name] = state["response"]
                     logger.info(f"Stored AI output in variable '{output_variable_name}'")
-                    
+
             except Exception as e:
                 logger.exception("LLM error")
                 state["response"] = f"Error generating response: {str(e)}"
@@ -506,6 +526,7 @@ class NodeProcessors:
             query = state["user_message"]
 
             # Initialize OpenAI embeddings with user key
+            _t_ret_start = datetime.now()
             embeddings = OpenAIEmbeddings(
                 model="text-embedding-3-small",
                 openai_api_key=api_key
@@ -605,6 +626,8 @@ class NodeProcessors:
 
             # Query the vector store
             docs_and_scores = vectorstore.similarity_search_with_score(query, k=top_k)
+            state["t_ret_ms"] = (datetime.now() - _t_ret_start).total_seconds() * 1000
+            logger.info("MANJU_TIMING rag t_ret_ms=%.1f", state["t_ret_ms"])
             state["rag_debug"]["results_requested"] = top_k
 
             # Format context
@@ -1047,6 +1070,9 @@ class WorkflowExecutor:
             "model_used": None,
             "output_variables": {},  # Track AI outputs for conditions
             "openai_api_key": openai_api_key,  # User-provided API key
+            "t_ret_ms": None,
+            "t_llm_ms": None,
+            "t_ttft_ms": None,
         }
         
         # Execute the graph
@@ -1056,6 +1082,9 @@ class WorkflowExecutor:
                 "response": final_state.get("response", "No response generated"),
                 "nodes_executed": final_state.get("nodes_executed", []),
                 "model_used": final_state.get("model_used"),
+                "t_ret_ms": final_state.get("t_ret_ms"),
+                "t_llm_ms": final_state.get("t_llm_ms"),
+                "t_ttft_ms": final_state.get("t_ttft_ms"),
                 # Expose rag debug info to help troubleshooting RAG connectivity
                 "rag_debug": final_state.get("rag_debug", {}),
             }
