@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MoreVertical, Play, Trash2, Edit2 } from 'lucide-react';
+import { MoreVertical, Play, Pause, Trash2, Edit2, Volume2 } from 'lucide-react';
 
 interface Voice {
     id: string;
@@ -42,6 +42,19 @@ export default function VoiceCard({
     onDelete,
 }: VoiceCardProps) {
     const [menuOpen, setMenuOpen] = useState(false);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [progress, setProgress] = useState(0);
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+
+    // Clean up audio on unmount
+    useEffect(() => {
+        return () => {
+            if (audioRef.current) {
+                audioRef.current.pause();
+                audioRef.current = null;
+            }
+        };
+    }, []);
 
     // Generate avatar color based on voice name
     const getAvatarColor = (name: string) => {
@@ -57,24 +70,117 @@ export default function VoiceCard({
         return colors[index];
     };
 
+    const handleCardClick = (e: React.MouseEvent) => {
+        // Don't trigger if clicking on action buttons
+        const target = e.target as HTMLElement;
+        if (target.closest('button') || target.closest('[data-action]')) {
+            return;
+        }
+        togglePlayPause();
+    };
+
+    const togglePlayPause = async () => {
+        if (!voice.voice_url || voice.voice_url === 'placeholder') {
+            onPlay?.();
+            return;
+        }
+
+        // Construct full URL if it's a relative path
+        let audioUrl = voice.voice_url;
+        if (audioUrl.startsWith('/api/')) {
+            const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+            audioUrl = `${API_BASE}${audioUrl}`;
+        }
+
+        if (!audioRef.current) {
+            audioRef.current = new Audio(audioUrl);
+            audioRef.current.addEventListener('ended', () => {
+                setIsPlaying(false);
+                setProgress(0);
+            });
+            audioRef.current.addEventListener('timeupdate', () => {
+                if (audioRef.current) {
+                    const prog = (audioRef.current.currentTime / audioRef.current.duration) * 100;
+                    setProgress(prog);
+                }
+            });
+            audioRef.current.addEventListener('error', (e) => {
+                console.error('Audio playback error:', e);
+                setIsPlaying(false);
+            });
+        }
+
+        if (isPlaying) {
+            audioRef.current.pause();
+            setIsPlaying(false);
+        } else {
+            try {
+                await audioRef.current.play();
+                setIsPlaying(true);
+                onPlay?.();
+            } catch (err) {
+                console.error('Failed to play audio:', err);
+            }
+        }
+    };
+
     return (
         <motion.div
-            className="flex items-center gap-4 p-4 bg-white rounded-xl border border-gray-100 hover:shadow-md transition-shadow"
+            onClick={handleCardClick}
+            className="flex items-center gap-4 p-4 bg-white rounded-xl border border-gray-100 hover:shadow-md hover:border-purple-200 transition-all cursor-pointer group"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
         >
-            {/* Avatar */}
-            <button
-                onClick={onPlay}
-                className={`relative w-14 h-14 rounded-full bg-gradient-to-br ${getAvatarColor(voice.voice_name)} flex items-center justify-center group cursor-pointer flex-shrink-0`}
+            {/* Avatar with Play/Pause */}
+            <div
+                className={`relative w-14 h-14 rounded-full bg-gradient-to-br ${getAvatarColor(voice.voice_name)} flex items-center justify-center flex-shrink-0 overflow-hidden`}
             >
-                <span className="text-white text-lg font-bold">
-                    {voice.voice_name.charAt(0).toUpperCase()}
-                </span>
-                <div className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Play className="w-5 h-5 text-white" />
+                {/* Progress ring */}
+                {isPlaying && (
+                    <svg className="absolute inset-0 w-full h-full -rotate-90">
+                        <circle
+                            cx="28"
+                            cy="28"
+                            r="26"
+                            fill="none"
+                            stroke="rgba(255,255,255,0.3)"
+                            strokeWidth="4"
+                        />
+                        <circle
+                            cx="28"
+                            cy="28"
+                            r="26"
+                            fill="none"
+                            stroke="white"
+                            strokeWidth="4"
+                            strokeDasharray={`${2 * Math.PI * 26}`}
+                            strokeDashoffset={`${2 * Math.PI * 26 * (1 - progress / 100)}`}
+                            className="transition-all duration-100"
+                        />
+                    </svg>
+                )}
+
+                {/* Icon */}
+                <div className="relative z-10 flex items-center justify-center">
+                    {isPlaying ? (
+                        <Pause className="w-5 h-5 text-white" />
+                    ) : (
+                        <>
+                            <span className="text-white text-lg font-bold group-hover:hidden">
+                                {voice.voice_name.charAt(0).toUpperCase()}
+                            </span>
+                            <Play className="w-5 h-5 text-white hidden group-hover:block ml-0.5" />
+                        </>
+                    )}
                 </div>
-            </button>
+
+                {/* Playing indicator */}
+                {isPlaying && (
+                    <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex gap-0.5">
+                        <Volume2 className="w-3 h-3 text-white animate-pulse" />
+                    </div>
+                )}
+            </div>
 
             {/* Info */}
             <div className="flex-1 min-w-0">
@@ -104,9 +210,12 @@ export default function VoiceCard({
             </div>
 
             {/* Actions */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2" data-action="true">
                 <motion.button
-                    onClick={onUse}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onUse?.();
+                    }}
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     className="px-4 py-1.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors"
@@ -116,7 +225,10 @@ export default function VoiceCard({
 
                 <div className="relative">
                     <button
-                        onClick={() => setMenuOpen(!menuOpen)}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setMenuOpen(!menuOpen);
+                        }}
                         className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
                     >
                         <MoreVertical className="w-5 h-5 text-gray-400" />
@@ -127,7 +239,10 @@ export default function VoiceCard({
                             <>
                                 <div
                                     className="fixed inset-0 z-10"
-                                    onClick={() => setMenuOpen(false)}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setMenuOpen(false);
+                                    }}
                                 />
                                 <motion.div
                                     initial={{ opacity: 0, scale: 0.95 }}
@@ -136,7 +251,8 @@ export default function VoiceCard({
                                     className="absolute right-0 top-full mt-1 w-36 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1"
                                 >
                                     <button
-                                        onClick={() => {
+                                        onClick={(e) => {
+                                            e.stopPropagation();
                                             setMenuOpen(false);
                                             onEdit?.();
                                         }}
@@ -146,7 +262,8 @@ export default function VoiceCard({
                                         Edit
                                     </button>
                                     <button
-                                        onClick={() => {
+                                        onClick={(e) => {
+                                            e.stopPropagation();
                                             setMenuOpen(false);
                                             onDelete?.();
                                         }}

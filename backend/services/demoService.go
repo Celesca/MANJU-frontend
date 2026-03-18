@@ -183,6 +183,7 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Key", os.Getenv("MANJU_API_KEY"))
 
+	t0 := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("[ERROR] AI service call failed: %v", err)
@@ -216,6 +217,10 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	if err := json.Unmarshal(responseBody, &aiResponse); err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to parse AI response"})
 	}
+
+	roundTripMs := float64(time.Since(t0).Milliseconds())
+	log.Printf("[MANJU_TIMING] /demo project=%s round_trip_ms=%.1f ai_processing_ms=%.1f model=%s nodes=%v",
+		projectID, roundTripMs, aiResponse.ProcessingTimeMs, aiResponse.ModelUsed, aiResponse.NodesExecuted)
 
 	return c.JSON(aiResponse)
 }
@@ -344,6 +349,7 @@ type WorkflowTypeResponse struct {
 	HasRAG       bool   `json:"has_rag"`
 	HasSheets    bool   `json:"has_sheets"`
 	HasCondition bool   `json:"has_condition"`
+	TTSProvider  string `json:"tts_provider,omitempty"` // "openai" | "qwen3"
 }
 
 // GetWorkflowType detects the workflow input/output modalities
@@ -427,6 +433,19 @@ func GetWorkflowType(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 			outputType = "voice"
 		}
 
+		// Detect TTS provider from voice-output node data
+		ttsProvider := "openai"
+		for _, node := range nodes {
+			if t, ok := node["type"].(string); ok && t == "voice-output" {
+				if data, ok := node["data"].(map[string]interface{}); ok {
+					if provider, ok := data["ttsProvider"].(string); ok && provider != "" {
+						ttsProvider = provider
+					}
+				}
+				break
+			}
+		}
+
 		return c.JSON(WorkflowTypeResponse{
 			InputType:    inputType,
 			OutputType:   outputType,
@@ -434,6 +453,7 @@ func GetWorkflowType(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 			HasRAG:       contains(nodeTypes, "rag-documents"),
 			HasSheets:    contains(nodeTypes, "google-sheets"),
 			HasCondition: contains(nodeTypes, "if-condition"),
+			TTSProvider:  ttsProvider,
 		})
 	}
 	defer resp.Body.Close()

@@ -34,3 +34,7 @@ func (vc *VoiceController) GetVoice(c *fiber.Ctx) error {
 func (vc *VoiceController) DeleteVoice(c *fiber.Ctx) error {
 	return services.DeleteVoice(c, vc.repo)
 }
+
+func (vc *VoiceController) CloneVoice(c *fiber.Ctx) error {
+	return services.CloneVoice(c, vc.repo)
+}

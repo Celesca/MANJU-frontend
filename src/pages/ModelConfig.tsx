@@ -14,6 +14,7 @@ import {
   AIModelConfigPanel,
   RAGDocumentConfigPanel,
   GoogleSheetsConfigPanel,
+  VoiceOutputConfigPanel,
 } from '../components/workflow/config';
 import IfConditionConfigPanel from '../components/workflow/config/IfConditionConfigPanel';
 import type {
@@ -26,6 +27,7 @@ import type {
   RAGDocumentData,
   GoogleSheetsData,
   IfConditionData,
+  VoiceOutputData,
 } from '../types/workflow';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
@@ -353,6 +355,14 @@ export default function ModelConfig() {
         return (
           <IfConditionConfigPanel
             data={configPanelNode.data as IfConditionData}
+            onSave={(data) => handleConfigSave(configPanelNode.id, data)}
+            onClose={() => setConfigPanelNode(null)}
+          />
+        );
+      case 'voice-output':
+        return (
+          <VoiceOutputConfigPanel
+            data={configPanelNode.data as VoiceOutputData}
             onSave={(data) => handleConfigSave(configPanelNode.id, data)}
             onClose={() => setConfigPanelNode(null)}
           />

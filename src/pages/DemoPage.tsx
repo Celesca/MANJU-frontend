@@ -8,6 +8,7 @@ import {
   Loader2, VolumeX, Zap
 } from 'lucide-react';
 import { apiFetch } from '../utils/api';
+import { getCachedAudio, setCachedAudio, concatenateWavBlobs } from '../utils/audioCache';
 import Navbar from '../components/Navbar';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
@@ -21,6 +22,24 @@ interface Message {
   processing_time_ms?: number;
   nodes_executed?: string[];
   audioUrl?: string; // For voice output
+  audioCacheKey?: string; // IndexedDB cache key for replaying audio
+}
+
+interface TalkResult {
+  text_response: string;
+  sentences: string[];
+  cache_key: string;
+  model_used?: string;
+  processing_time_ms?: number;
+  nodes_executed?: string[];
+  tts_settings: {
+    tts_mode: string;
+    voice_name: string;
+    instruction?: string;
+    voice_description?: string;
+    reference_voice_id?: string;
+    use_fast_mode: boolean;
+  };
 }
 
 interface Project {
@@ -44,6 +63,7 @@ interface WorkflowType {
   has_rag: boolean;
   has_sheets: boolean;
   has_condition: boolean;
+  tts_provider?: 'openai' | 'qwen3';
 }
 
 export default function DemoPage() {
@@ -84,6 +104,7 @@ export default function DemoPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsCancelledRef = useRef(false);
 
   // Load project and validate on mount
   useEffect(() => {
@@ -182,42 +203,70 @@ export default function DemoPage() {
         content: msg.content,
       }));
 
-      // For voice workflows, we could send the audio blob
-      // For now, we'll send the transcription
-      const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/demo`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          message: mockTranscription,
-          conversation_history: conversationHistory,
-          session_id: projectId,
-          is_voice_input: true,
-        }),
-      });
+      const isQwen3Voice =
+        workflowType?.output_type === 'voice' && workflowType?.tts_provider === 'qwen3';
 
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to get response');
-      }
+      if (isQwen3Voice) {
+        // Qwen3 TTS path — workflow → sentences → pipeline playback
+        const talkResult = await callTalkEndpoint(mockTranscription, conversationHistory);
+        if (!talkResult) {
+          throw new Error('Failed to get voice response from Qwen3 TTS');
+        }
 
-      const data = await res.json();
+        const assistantMessage: Message = {
+          id: `msg-${Date.now()}-assistant`,
+          role: 'assistant',
+          content: talkResult.text_response || '[Voice response]',
+          timestamp: new Date(),
+          model_used: talkResult.model_used,
+          processing_time_ms: talkResult.processing_time_ms,
+          nodes_executed: talkResult.nodes_executed,
+          audioCacheKey: talkResult.cache_key,
+        };
 
-      const assistantMessage: Message = {
-        id: `msg-${Date.now()}-assistant`,
-        role: 'assistant',
-        content: data.response,
-        timestamp: new Date(),
-        model_used: data.model_used,
-        processing_time_ms: data.processing_time_ms,
-        nodes_executed: data.nodes_executed,
-      };
+        setMessages(prev => [...prev, assistantMessage]);
+        ttsCancelledRef.current = false;
+        setPlayingAudioId(assistantMessage.id);
+        await playTTSPipeline(talkResult.sentences, talkResult.cache_key, talkResult.tts_settings);
+        setPlayingAudioId(null);
+      } else {
+        // Standard OpenAI TTS path
+        const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/demo`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            message: mockTranscription,
+            conversation_history: conversationHistory,
+            session_id: projectId,
+            is_voice_input: true,
+          }),
+        });
 
-      setMessages(prev => [...prev, assistantMessage]);
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(errorData.error || 'Failed to get response');
+        }
 
-      // If voice output, play the audio
-      if (workflowType?.output_type === 'voice') {
-        speakResponse(data.response);
+        const data = await res.json();
+
+        const assistantMessage: Message = {
+          id: `msg-${Date.now()}-assistant`,
+          role: 'assistant',
+          content: data.response,
+          timestamp: new Date(),
+          model_used: data.model_used,
+          processing_time_ms: data.processing_time_ms,
+          nodes_executed: data.nodes_executed,
+        };
+
+        setMessages(prev => [...prev, assistantMessage]);
+
+        // If voice output, play the audio
+        if (workflowType?.output_type === 'voice') {
+          setPlayingAudioId(assistantMessage.id);
+          speakResponse(data.response, assistantMessage.id);
+        }
       }
 
     } catch (err) {
@@ -445,7 +494,7 @@ export default function DemoPage() {
   }, [mediaRecorder, isRecording, isRecognizing, stopVADMonitoring]);
 
   // Text-to-speech for voice output using backend OpenAI TTS
-  const speakResponse = async (text: string) => {
+  const speakResponse = async (text: string, messageId?: string) => {
     try {
       // Cancel any ongoing audio
       if (audioRef.current) {
@@ -473,6 +522,8 @@ export default function DemoPage() {
       const audio = new Audio(url);
       audioRef.current = audio;
 
+      if (messageId) setPlayingAudioId(messageId);
+
       audio.onended = () => {
         setPlayingAudioId(null);
         URL.revokeObjectURL(url);
@@ -486,7 +537,175 @@ export default function DemoPage() {
     }
   };
 
+  // ---------------------------------------------------------------------------
+  // Qwen3 TTS helpers: sentence-level pipeline with audio caching
+  // ---------------------------------------------------------------------------
+
+  /** Call /talk — returns JSON with text + sentences + cache key (no audio). */
+  const callTalkEndpoint = async (
+    message: string,
+    conversationHistory: { role: string; content: string }[],
+  ): Promise<TalkResult | null> => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/talk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          message,
+          conversation_history: conversationHistory,
+          session_id: projectId,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to get voice response');
+      }
+
+      return await res.json();
+    } catch (err) {
+      console.error('Qwen TTS /talk error:', err);
+      return null;
+    }
+  };
+
+  /** TTS a single sentence chunk via /qwen-tts/tts-sentence. Returns complete WAV blob. */
+  const fetchSentenceTTS = async (
+    text: string,
+    ttsSettings: TalkResult['tts_settings'],
+  ): Promise<Blob> => {
+    const res = await apiFetch(`${API_BASE}/api/qwen-tts/tts-sentence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ text, ...ttsSettings }),
+    });
+    if (!res.ok) throw new Error(`TTS sentence failed: ${res.status}`);
+    return res.blob();
+  };
+
+  /** Play a blob through a standard HTML5 Audio element. Resolves when done. */
+  const playBlobAsync = (blob: Blob): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        audioRef.current = null;
+        resolve();
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        audioRef.current = null;
+        reject(new Error('Audio playback error'));
+      };
+      audio.play().catch(reject);
+    });
+  };
+
+  /**
+   * Sentence-level TTS pipeline with pre-fetching and audio caching.
+   *
+   * 1. Check IndexedDB cache → if hit, play the cached full audio.
+   * 2. If cache miss, TTS each sentence individually:
+   *    - Pre-fetch the next sentence while the current one plays.
+   *    - User hears sentence 1 while sentence 2 is being generated.
+   * 3. After all sentences finish, concatenate WAV blobs and store
+   *    in IndexedDB for instant replay.
+   */
+  const playTTSPipeline = async (
+    sentences: string[],
+    cacheKey: string,
+    ttsSettings: TalkResult['tts_settings'],
+  ): Promise<void> => {
+    // --- Cache hit: instant replay ---
+    try {
+      const cached = await getCachedAudio(cacheKey);
+      if (cached) {
+        await playBlobAsync(cached);
+        return;
+      }
+    } catch { /* cache read failed, continue */ }
+
+    if (sentences.length === 0) return;
+
+    // --- Cache miss: sentence pipeline ---
+    const blobs: Blob[] = [];
+    const promises: (Promise<Blob> | null)[] = new Array(sentences.length).fill(null);
+
+    // Kick off first 2 sentences in parallel
+    promises[0] = fetchSentenceTTS(sentences[0], ttsSettings);
+    if (sentences.length > 1) {
+      promises[1] = fetchSentenceTTS(sentences[1], ttsSettings);
+    }
+
+    for (let i = 0; i < sentences.length; i++) {
+      if (ttsCancelledRef.current) break;
+
+      // Wait for this sentence's audio
+      const blob = await promises[i]!;
+      blobs.push(blob);
+
+      // Pre-fetch next-next sentence while we play current
+      if (i + 2 < sentences.length) {
+        promises[i + 2] = fetchSentenceTTS(sentences[i + 2], ttsSettings);
+      }
+
+      if (ttsCancelledRef.current) break;
+
+      // Play this sentence (standard Audio element — reliable, no alien sounds)
+      await playBlobAsync(blob);
+    }
+
+    // --- Concatenate and cache for future replay ---
+    if (!ttsCancelledRef.current && blobs.length > 0) {
+      try {
+        const fullBlob = await concatenateWavBlobs(blobs);
+        await setCachedAudio(cacheKey, fullBlob);
+      } catch (e) {
+        console.warn('Failed to cache concatenated audio:', e);
+      }
+    }
+  };
+
+  /**
+   * Play cached audio for a message, or re-synthesise via text-to-voice
+   * as a fallback (single call, no workflow re-run).
+   */
+  const playFromCacheOrTTS = async (message: Message): Promise<void> => {
+    // 1. Try IndexedDB cache
+    if (message.audioCacheKey) {
+      try {
+        const cached = await getCachedAudio(message.audioCacheKey);
+        if (cached) {
+          await playBlobAsync(cached);
+          return;
+        }
+      } catch { /* ignore */ }
+    }
+
+    // 2. Fallback: re-TTS via text-to-voice (no workflow re-run)
+    const formData = new FormData();
+    formData.append('text', message.content);
+    const res = await apiFetch(`${API_BASE}/api/qwen-tts/text-to-voice`, {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+    });
+    if (!res.ok) throw new Error('Qwen3 TTS failed');
+    const blob = await res.blob();
+
+    // Store in cache for next time
+    if (message.audioCacheKey) {
+      await setCachedAudio(message.audioCacheKey, blob).catch(() => {});
+    }
+    await playBlobAsync(blob);
+  };
+
   const stopSpeaking = () => {
+    ttsCancelledRef.current = true;
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;
@@ -516,39 +735,70 @@ export default function DemoPage() {
         content: msg.content,
       }));
 
-      const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/demo`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          message: userMessage.content,
-          conversation_history: conversationHistory,
-          session_id: projectId,
-        }),
-      });
+      const isQwen3Voice =
+        workflowType?.output_type === 'voice' && workflowType?.tts_provider === 'qwen3';
 
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to get response');
-      }
+      if (isQwen3Voice) {
+        // ---- Qwen3 TTS path: /talk → JSON, then sentence pipeline ----
+        const talkResult = await callTalkEndpoint(userMessage.content, conversationHistory);
 
-      const data = await res.json();
+        if (!talkResult) {
+          throw new Error('Failed to get voice response from Qwen3 TTS');
+        }
 
-      const assistantMessage: Message = {
-        id: `msg-${Date.now()}-assistant`,
-        role: 'assistant',
-        content: data.response,
-        timestamp: new Date(),
-        model_used: data.model_used,
-        processing_time_ms: data.processing_time_ms,
-        nodes_executed: data.nodes_executed,
-      };
+        const assistantMessage: Message = {
+          id: `msg-${Date.now()}-assistant`,
+          role: 'assistant',
+          content: talkResult.text_response || '[Voice response]',
+          timestamp: new Date(),
+          model_used: talkResult.model_used,
+          processing_time_ms: talkResult.processing_time_ms,
+          nodes_executed: talkResult.nodes_executed,
+          audioCacheKey: talkResult.cache_key,
+        };
 
-      setMessages(prev => [...prev, assistantMessage]);
+        setMessages(prev => [...prev, assistantMessage]);
+        ttsCancelledRef.current = false;
+        setPlayingAudioId(assistantMessage.id);
+        await playTTSPipeline(talkResult.sentences, talkResult.cache_key, talkResult.tts_settings);
+        setPlayingAudioId(null);
+      } else {
+        // ---- Standard path: /demo for text, then optionally OpenAI TTS ----
+        const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/demo`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            message: userMessage.content,
+            conversation_history: conversationHistory,
+            session_id: projectId,
+          }),
+        });
 
-      // If voice output workflow, automatically speak the response
-      if (workflowType?.output_type === 'voice') {
-        speakResponse(data.response);
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(errorData.error || 'Failed to get response');
+        }
+
+        const data = await res.json();
+
+        const assistantMessage: Message = {
+          id: `msg-${Date.now()}-assistant`,
+          role: 'assistant',
+          content: data.response,
+          timestamp: new Date(),
+          model_used: data.model_used,
+          processing_time_ms: data.processing_time_ms,
+          nodes_executed: data.nodes_executed,
+        };
+
+        setMessages(prev => [...prev, assistantMessage]);
+
+        // If voice output workflow (OpenAI TTS), automatically speak the response
+        if (workflowType?.output_type === 'voice') {
+          setPlayingAudioId(assistantMessage.id);
+          speakResponse(data.response, assistantMessage.id);
+        }
       }
 
     } catch (err) {
@@ -712,7 +962,23 @@ export default function DemoPage() {
                               stopSpeaking();
                             } else {
                               setPlayingAudioId(message.id);
-                              speakResponse(message.content);
+                              if (workflowType?.tts_provider === 'qwen3') {
+                                // Play from cache or re-synthesize (no workflow re-run)
+                                (async () => {
+                                  try {
+                                    stopSpeaking();
+                                    ttsCancelledRef.current = false;
+                                    setPlayingAudioId(message.id);
+                                    await playFromCacheOrTTS(message);
+                                    setPlayingAudioId(null);
+                                  } catch (err) {
+                                    console.error('Qwen3 replay error:', err);
+                                    setPlayingAudioId(null);
+                                  }
+                                })();
+                              } else {
+                                speakResponse(message.content, message.id);
+                              }
                             }
                           }}
                           className="flex items-center gap-1 text-xs text-purple-600 hover:text-purple-800 transition-colors"
@@ -812,7 +1078,9 @@ export default function DemoPage() {
                 ? 'bg-green-100 text-green-700'
                 : 'bg-gray-100 text-gray-600'
                 }`}>
-                {workflowType.output_type === 'voice' ? '🔊 Voice Output' : '💬 Text Output'}
+                {workflowType.output_type === 'voice'
+                  ? `🔊 Voice Output (${workflowType.tts_provider === 'qwen3' ? 'Qwen3' : 'OpenAI'})`
+                  : '💬 Text Output'}
               </span>
             </div>
           )}

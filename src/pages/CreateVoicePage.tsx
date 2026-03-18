@@ -124,10 +124,29 @@ export default function CreateVoicePage() {
 
         setSaving(true);
         try {
-            // For now, we'll use a placeholder URL since file upload would need a separate endpoint
-            // In production, you'd upload the file first and get a URL back
-            const voiceUrl = fileUrl || 'placeholder';
+            // Step 1: Upload the audio file to get a permanent URL
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('voice_name', voiceName.trim());
 
+            const uploadRes = await apiFetch(`${API_BASE}/api/voices/upload`, {
+                method: 'POST',
+                credentials: 'include',
+                body: formData,
+            });
+
+            if (!uploadRes.ok) {
+                const error = await uploadRes.json();
+                throw new Error(error.error || 'Failed to upload audio file');
+            }
+
+            const uploadData = await uploadRes.json();
+            // Azure URLs are complete, local URLs need API_BASE prefix
+            const voiceUrl = uploadData.url.startsWith('http')
+                ? uploadData.url
+                : `${API_BASE}${uploadData.url}`;
+
+            // Step 2: Create the voice record with the uploaded file URL
             const res = await apiFetch(`${API_BASE}/api/voices`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -158,7 +177,7 @@ export default function CreateVoicePage() {
             navigate('/console/voices');
         } catch (err) {
             console.error('Failed to create voice:', err);
-            Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to create voice. Please try again.' });
+            Swal.fire({ icon: 'error', title: 'Error', text: err instanceof Error ? err.message : 'Failed to create voice. Please try again.' });
         } finally {
             setSaving(false);
         }

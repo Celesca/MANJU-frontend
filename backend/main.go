@@ -43,6 +43,7 @@ func main() {
 		AllowCredentials: true,
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, X-API-Key",
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
+		ExposeHeaders:    "X-Text-Response, X-Model-Used, X-Processing-Time-Ms, X-Nodes-Executed",
 	}))
 
 	// API Key Security Layer
@@ -98,6 +99,7 @@ func main() {
 	routes.UserRoutes(api)
 	routes.VoiceRoutes(api)
 	routes.ProjectRoutes(api)
+	routes.QwenTTSRoutes(api)
 
 	log.Fatal(app.Listen(":8080"))
 }

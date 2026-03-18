@@ -68,6 +68,16 @@ export interface VoiceOutputData {
   voice: string;
   speed: number;
   pitch: number;
+  // Qwen3-TTS settings
+  ttsProvider: 'openai' | 'qwen3';  // Which TTS engine to use
+  ttsMode: 'custom' | 'voice-clone' | 'voice-design';  // Qwen TTS mode
+  voiceName: string;  // For custom preset voices (e.g. "serena")
+  instruction?: string;  // Style instruction for custom voice
+  voiceDescription?: string;  // For voice-design mode
+  referenceVoiceId?: string;  // Cached reference voice ID for clone mode
+  referenceVoiceFilename?: string;  // Display name of uploaded reference
+  refTranscript?: string;  // Transcript of reference audio
+  useFastMode: boolean;  // Fast mode for voice cloning
 }
 
 export interface TextInputData {
