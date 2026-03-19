@@ -218,7 +218,9 @@ export default function DemoPage() {
 
       if (isQwen3Voice) {
         // Qwen3 TTS path — workflow → sentences → pipeline playback
+        const llmStart = Date.now();
         const talkResult = await callTalkEndpoint(mockTranscription, conversationHistory);
+        const llm_time_ms = Date.now() - llmStart;
         if (!talkResult) {
           throw new Error('Failed to get voice response from Qwen3 TTS');
         }
@@ -231,7 +233,7 @@ export default function DemoPage() {
           model_used: talkResult.model_used,
           processing_time_ms: talkResult.processing_time_ms,
           asr_time_ms: talkResult.asr_time_ms,
-          llm_time_ms: talkResult.llm_time_ms,
+          llm_time_ms: talkResult.llm_time_ms ?? llm_time_ms,
           tts_time_ms: talkResult.tts_time_ms,
           nodes_executed: talkResult.nodes_executed,
           audioCacheKey: talkResult.cache_key,
@@ -240,10 +242,16 @@ export default function DemoPage() {
         setMessages(prev => [...prev, assistantMessage]);
         ttsCancelledRef.current = false;
         setPlayingAudioId(assistantMessage.id);
+        const ttsStart = Date.now();
         await playTTSPipeline(talkResult.sentences, talkResult.cache_key, talkResult.tts_settings);
+        const tts_time_ms = Date.now() - ttsStart;
         setPlayingAudioId(null);
+        if (talkResult.tts_time_ms === undefined) {
+          setMessages(prev => prev.map(m => m.id === assistantMessage.id ? { ...m, tts_time_ms } : m));
+        }
       } else {
         // Standard OpenAI TTS path
+        const llmStart = Date.now();
         const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/demo`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -262,6 +270,7 @@ export default function DemoPage() {
         }
 
         const data = await res.json();
+        const llm_time_ms = Date.now() - llmStart;
 
         const assistantMessage: Message = {
           id: `msg-${Date.now()}-assistant`,
@@ -271,7 +280,7 @@ export default function DemoPage() {
           model_used: data.model_used,
           processing_time_ms: data.processing_time_ms,
           asr_time_ms: data.asr_time_ms,
-          llm_time_ms: data.llm_time_ms,
+          llm_time_ms: data.llm_time_ms ?? llm_time_ms,
           tts_time_ms: data.tts_time_ms,
           nodes_executed: data.nodes_executed,
         };
@@ -518,6 +527,7 @@ export default function DemoPage() {
         audioRef.current = null;
       }
 
+      const ttsStart = Date.now();
       const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -534,12 +544,13 @@ export default function DemoPage() {
       }
 
       const blob = await res.blob();
+      const tts_time_ms = Date.now() - ttsStart;
 
-      // Cache the blob so download works later
+      // Cache the blob and record timing so download + verbose work
       if (messageId) {
         const cacheKey = `openai-tts-${messageId}`;
         await setCachedAudio(cacheKey, blob).catch(() => {});
-        setMessages(prev => prev.map(m => m.id === messageId ? { ...m, audioCacheKey: cacheKey } : m));
+        setMessages(prev => prev.map(m => m.id === messageId ? { ...m, audioCacheKey: cacheKey, tts_time_ms } : m));
       }
 
       const url = URL.createObjectURL(blob);
@@ -812,7 +823,9 @@ export default function DemoPage() {
 
       if (isQwen3Voice) {
         // ---- Qwen3 TTS path: /talk → JSON, then sentence pipeline ----
+        const llmStart = Date.now();
         const talkResult = await callTalkEndpoint(userMessage.content, conversationHistory);
+        const llm_time_ms = Date.now() - llmStart;
 
         if (!talkResult) {
           throw new Error('Failed to get voice response from Qwen3 TTS');
@@ -826,7 +839,7 @@ export default function DemoPage() {
           model_used: talkResult.model_used,
           processing_time_ms: talkResult.processing_time_ms,
           asr_time_ms: talkResult.asr_time_ms,
-          llm_time_ms: talkResult.llm_time_ms,
+          llm_time_ms: talkResult.llm_time_ms ?? llm_time_ms,
           tts_time_ms: talkResult.tts_time_ms,
           nodes_executed: talkResult.nodes_executed,
           audioCacheKey: talkResult.cache_key,
@@ -835,10 +848,16 @@ export default function DemoPage() {
         setMessages(prev => [...prev, assistantMessage]);
         ttsCancelledRef.current = false;
         setPlayingAudioId(assistantMessage.id);
+        const ttsStart = Date.now();
         await playTTSPipeline(talkResult.sentences, talkResult.cache_key, talkResult.tts_settings);
+        const tts_time_ms = Date.now() - ttsStart;
         setPlayingAudioId(null);
+        if (talkResult.tts_time_ms === undefined) {
+          setMessages(prev => prev.map(m => m.id === assistantMessage.id ? { ...m, tts_time_ms } : m));
+        }
       } else {
         // ---- Standard path: /demo for text, then optionally OpenAI TTS ----
+        const llmStart = Date.now();
         const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/demo`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -856,6 +875,7 @@ export default function DemoPage() {
         }
 
         const data = await res.json();
+        const llm_time_ms = Date.now() - llmStart;
 
         const assistantMessage: Message = {
           id: `msg-${Date.now()}-assistant`,
@@ -865,7 +885,7 @@ export default function DemoPage() {
           model_used: data.model_used,
           processing_time_ms: data.processing_time_ms,
           asr_time_ms: data.asr_time_ms,
-          llm_time_ms: data.llm_time_ms,
+          llm_time_ms: data.llm_time_ms ?? llm_time_ms,
           tts_time_ms: data.tts_time_ms,
           nodes_executed: data.nodes_executed,
         };
@@ -1107,26 +1127,22 @@ export default function DemoPage() {
                           <span className="text-green-700 font-semibold">{message.processing_time_ms.toFixed(0)} ms</span>
                         </div>
                       )}
-                      {(message.asr_time_ms !== undefined || message.llm_time_ms !== undefined || message.tts_time_ms !== undefined) && (
-                        <div className="text-gray-600 flex flex-wrap gap-3">
-                          {message.asr_time_ms !== undefined && (
-                            <span>
-                              <span className="font-medium">ASR:</span>{' '}
-                              <span className="text-blue-700 font-semibold">{message.asr_time_ms.toFixed(0)} ms</span>
-                            </span>
-                          )}
-                          {message.llm_time_ms !== undefined && (
-                            <span>
-                              <span className="font-medium">LLM:</span>{' '}
-                              <span className="text-purple-700 font-semibold">{message.llm_time_ms.toFixed(0)} ms</span>
-                            </span>
-                          )}
-                          {message.tts_time_ms !== undefined && (
-                            <span>
-                              <span className="font-medium">TTS:</span>{' '}
-                              <span className="text-orange-700 font-semibold">{message.tts_time_ms.toFixed(0)} ms</span>
-                            </span>
-                          )}
+                      {message.asr_time_ms !== undefined && (
+                        <div className="text-gray-600">
+                          <span className="font-medium">Time (ASR):</span>{' '}
+                          <span className="text-blue-700 font-semibold">{message.asr_time_ms.toFixed(0)} ms</span>
+                        </div>
+                      )}
+                      {message.llm_time_ms !== undefined && (
+                        <div className="text-gray-600">
+                          <span className="font-medium">Time (LLM):</span>{' '}
+                          <span className="text-purple-700 font-semibold">{message.llm_time_ms.toFixed(0)} ms</span>
+                        </div>
+                      )}
+                      {message.tts_time_ms !== undefined && (
+                        <div className="text-gray-600">
+                          <span className="font-medium">Time (TTS):</span>{' '}
+                          <span className="text-orange-700 font-semibold">{message.tts_time_ms.toFixed(0)} ms</span>
                         </div>
                       )}
                       {message.nodes_executed && message.nodes_executed.length > 0 && (
