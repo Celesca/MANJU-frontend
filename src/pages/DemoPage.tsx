@@ -21,6 +21,9 @@ interface Message {
   timestamp: Date;
   model_used?: string;
   processing_time_ms?: number;
+  asr_time_ms?: number;
+  llm_time_ms?: number;
+  tts_time_ms?: number;
   nodes_executed?: string[];
   audioUrl?: string; // For voice output
   audioCacheKey?: string; // IndexedDB cache key for replaying audio
@@ -32,6 +35,9 @@ interface TalkResult {
   cache_key: string;
   model_used?: string;
   processing_time_ms?: number;
+  asr_time_ms?: number;
+  llm_time_ms?: number;
+  tts_time_ms?: number;
   nodes_executed?: string[];
   tts_settings: {
     tts_mode: string;
@@ -224,6 +230,9 @@ export default function DemoPage() {
           timestamp: new Date(),
           model_used: talkResult.model_used,
           processing_time_ms: talkResult.processing_time_ms,
+          asr_time_ms: talkResult.asr_time_ms,
+          llm_time_ms: talkResult.llm_time_ms,
+          tts_time_ms: talkResult.tts_time_ms,
           nodes_executed: talkResult.nodes_executed,
           audioCacheKey: talkResult.cache_key,
         };
@@ -261,6 +270,9 @@ export default function DemoPage() {
           timestamp: new Date(),
           model_used: data.model_used,
           processing_time_ms: data.processing_time_ms,
+          asr_time_ms: data.asr_time_ms,
+          llm_time_ms: data.llm_time_ms,
+          tts_time_ms: data.tts_time_ms,
           nodes_executed: data.nodes_executed,
         };
 
@@ -522,6 +534,14 @@ export default function DemoPage() {
       }
 
       const blob = await res.blob();
+
+      // Cache the blob so download works later
+      if (messageId) {
+        const cacheKey = `openai-tts-${messageId}`;
+        await setCachedAudio(cacheKey, blob).catch(() => {});
+        setMessages(prev => prev.map(m => m.id === messageId ? { ...m, audioCacheKey: cacheKey } : m));
+      }
+
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audioRef.current = audio;
@@ -537,7 +557,6 @@ export default function DemoPage() {
     } catch (err) {
       console.error('TTS error:', err);
       setPlayingAudioId(null);
-      // Fallback to browser TTS if desired, or just show error
     }
   };
 
@@ -727,26 +746,41 @@ export default function DemoPage() {
       } catch { /* ignore */ }
     }
 
-    // Fallback: re-fetch from TTS if not cached
+    // Fallback: re-fetch from the appropriate TTS endpoint
     if (!blob) {
       try {
-        const fd = new FormData();
-        fd.append('text', message.content);
-        const res = await apiFetch(`${API_BASE}/api/qwen-tts/text-to-voice`, {
-          method: 'POST',
-          credentials: 'include',
-          body: fd,
-        });
-        if (res.ok) blob = await res.blob();
+        if (workflowType?.tts_provider === 'qwen3') {
+          const fd = new FormData();
+          fd.append('text', message.content);
+          const res = await apiFetch(`${API_BASE}/api/qwen-tts/text-to-voice`, {
+            method: 'POST',
+            credentials: 'include',
+            body: fd,
+          });
+          if (res.ok) blob = await res.blob();
+        } else {
+          const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/tts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              text: message.content,
+              voice: workflowType?.openai_voice || 'alloy',
+              model: workflowType?.openai_model || 'tts-1',
+            }),
+          });
+          if (res.ok) blob = await res.blob();
+        }
       } catch { /* ignore */ }
     }
 
     if (!blob) return;
 
+    const ext = workflowType?.tts_provider === 'qwen3' ? 'wav' : 'mp3';
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `voice-output-${message.id}.wav`;
+    a.download = `voice-output-${message.id}.${ext}`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -791,6 +825,9 @@ export default function DemoPage() {
           timestamp: new Date(),
           model_used: talkResult.model_used,
           processing_time_ms: talkResult.processing_time_ms,
+          asr_time_ms: talkResult.asr_time_ms,
+          llm_time_ms: talkResult.llm_time_ms,
+          tts_time_ms: talkResult.tts_time_ms,
           nodes_executed: talkResult.nodes_executed,
           audioCacheKey: talkResult.cache_key,
         };
@@ -827,6 +864,9 @@ export default function DemoPage() {
           timestamp: new Date(),
           model_used: data.model_used,
           processing_time_ms: data.processing_time_ms,
+          asr_time_ms: data.asr_time_ms,
+          llm_time_ms: data.llm_time_ms,
+          tts_time_ms: data.tts_time_ms,
           nodes_executed: data.nodes_executed,
         };
 
@@ -1063,8 +1103,30 @@ export default function DemoPage() {
                       )}
                       {message.processing_time_ms !== undefined && (
                         <div className="text-gray-600">
-                          <span className="font-medium">Processing time:</span>{' '}
+                          <span className="font-medium">Total time:</span>{' '}
                           <span className="text-green-700 font-semibold">{message.processing_time_ms.toFixed(0)} ms</span>
+                        </div>
+                      )}
+                      {(message.asr_time_ms !== undefined || message.llm_time_ms !== undefined || message.tts_time_ms !== undefined) && (
+                        <div className="text-gray-600 flex flex-wrap gap-3">
+                          {message.asr_time_ms !== undefined && (
+                            <span>
+                              <span className="font-medium">ASR:</span>{' '}
+                              <span className="text-blue-700 font-semibold">{message.asr_time_ms.toFixed(0)} ms</span>
+                            </span>
+                          )}
+                          {message.llm_time_ms !== undefined && (
+                            <span>
+                              <span className="font-medium">LLM:</span>{' '}
+                              <span className="text-purple-700 font-semibold">{message.llm_time_ms.toFixed(0)} ms</span>
+                            </span>
+                          )}
+                          {message.tts_time_ms !== undefined && (
+                            <span>
+                              <span className="font-medium">TTS:</span>{' '}
+                              <span className="text-orange-700 font-semibold">{message.tts_time_ms.toFixed(0)} ms</span>
+                            </span>
+                          )}
                         </div>
                       )}
                       {message.nodes_executed && message.nodes_executed.length > 0 && (
