@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { X, Bot, Key, Thermometer, Hash, MessageSquare, FileOutput, Variable, Plus, Check, Loader2 } from 'lucide-react';
+import { X, Bot, Key, Thermometer, Hash, MessageSquare, FileOutput, Variable, Plus, Check, Loader2, Link } from 'lucide-react';
 import type { AIModelData } from '../../../types/workflow';
 import { useAuth } from '../../../hooks/useAuth';
 import { apiFetch } from '../../../utils/api';
@@ -21,19 +21,20 @@ interface SavedAPIKey {
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
-// Only OpenAI for now - can be extended later
 const providers = [
   { id: 'openai', name: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'] },
+  { id: 'ollama', name: 'Ollama', models: [] }, // model entered freely; Ollama server handles it
 ];
 
 export default function AIModelConfigPanel({ data, onSave, onClose }: AIModelConfigPanelProps) {
   const { user } = useAuth();
   const [formData, setFormData] = useState<AIModelData>({
     ...data,
-    provider: 'openai', // Force OpenAI for now
+    provider: data.provider || 'openai',
     expectedOutput: data.expectedOutput || '',
     outputVariable: data.outputVariable || 'ai_response',
     selectedApiKeyId: data.selectedApiKeyId || '',
+    ollamaUrl: data.ollamaUrl || 'http://localhost:11434',
   });
 
   // API Keys state
@@ -107,7 +108,10 @@ export default function AIModelConfigPanel({ data, onSave, onClose }: AIModelCon
   const handleSave = () => {
     onSave({
       ...formData,
-      apiKeyConfigured: !!formData.selectedApiKeyId || savedKeys.length > 0,
+      apiKeyConfigured:
+        formData.provider === 'ollama'
+          ? true // Ollama needs no API key
+          : !!formData.selectedApiKeyId || savedKeys.length > 0,
     });
   };
 
@@ -131,38 +135,78 @@ export default function AIModelConfigPanel({ data, onSave, onClose }: AIModelCon
 
       {/* Form */}
       <div className="p-4 space-y-6">
-        {/* Provider (OpenAI only for now) */}
+        {/* Provider Selection */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Provider
-          </label>
-          <div className="px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-700">
-            OpenAI
+          <label className="block text-sm font-medium text-gray-700 mb-2">Provider</label>
+          <div className="grid grid-cols-2 gap-2">
+            {providers.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setFormData(prev => ({
+                  ...prev,
+                  provider: p.id as AIModelData['provider'],
+                  // reset model to first option or keep current
+                  modelName: p.models.length > 0 ? p.models[0] : prev.modelName,
+                }))}
+                className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors text-left ${
+                  formData.provider === p.id
+                    ? 'border-purple-500 bg-purple-50 text-purple-700'
+                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {p.name}
+              </button>
+            ))}
           </div>
-          <p className="mt-1 text-xs text-gray-500">
-            Currently only OpenAI is supported. More providers coming soon.
-          </p>
         </div>
+
+        {/* Ollama Server URL */}
+        {formData.provider === 'ollama' && (
+          <div className="p-3 bg-orange-50 rounded-lg border border-orange-100">
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+              <Link className="w-4 h-4 text-orange-600" />
+              Ollama Server URL
+            </label>
+            <input
+              type="text"
+              value={formData.ollamaUrl || 'http://localhost:11434'}
+              onChange={(e) => setFormData({ ...formData, ollamaUrl: e.target.value })}
+              placeholder="http://localhost:11434"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent font-mono text-sm"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              The Ollama server receives the model name and prompt via POST. No API key required.
+            </p>
+          </div>
+        )}
 
         {/* Model Selection */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Model
-          </label>
-          <select
-            value={formData.modelName}
-            onChange={(e) => setFormData({ ...formData, modelName: e.target.value })}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-          >
-            {currentProvider?.models.map((model) => (
-              <option key={model} value={model}>
-                {model}
-              </option>
-            ))}
-          </select>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Model</label>
+          {formData.provider === 'ollama' ? (
+            // Ollama: free-text model name (handled by Ollama server)
+            <input
+              type="text"
+              value={formData.modelName}
+              onChange={(e) => setFormData({ ...formData, modelName: e.target.value })}
+              placeholder="e.g. llama3, mistral, qwen2.5"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+            />
+          ) : (
+            <select
+              value={formData.modelName}
+              onChange={(e) => setFormData({ ...formData, modelName: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            >
+              {currentProvider?.models.map((model) => (
+                <option key={model} value={model}>{model}</option>
+              ))}
+            </select>
+          )}
         </div>
 
-        {/* API Key Selection */}
+        {/* API Key Selection (OpenAI only) */}
+        {formData.provider === 'openai' && (
         <div className="p-3 bg-purple-50 rounded-lg border border-purple-100">
           <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
             <Key className="w-4 h-4 text-purple-600" />
@@ -241,6 +285,7 @@ export default function AIModelConfigPanel({ data, onSave, onClose }: AIModelCon
             </span>
           </div>
         </div>
+        )}
 
         {/* System Prompt */}
         <div>

@@ -39,6 +39,11 @@ type TalkRequest struct {
 	Message             string                   `json:"message"`
 	ConversationHistory []map[string]interface{} `json:"conversation_history"`
 	SessionID           string                   `json:"session_id,omitempty"`
+	// TTS provider: "openai" | "qwen3"
+	TTSProvider string `json:"tts_provider,omitempty"`
+	// OpenAI TTS settings
+	OpenAIVoice string `json:"openai_voice,omitempty"`
+	OpenAIModel string `json:"openai_model,omitempty"`
 	// Qwen TTS settings
 	TTSMode          string `json:"tts_mode"`           // "custom" | "voice-clone" | "voice-design"
 	VoiceName        string `json:"voice_name"`         // For custom preset voices
@@ -105,6 +110,24 @@ func Talk(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		if nodeType == "voice-output" {
 			nodeData, ok := node["data"].(map[string]interface{})
 			if ok {
+				// TTS provider
+				if body.TTSProvider == "" {
+					if p, exists := nodeData["ttsProvider"].(string); exists && p != "" {
+						body.TTSProvider = p
+					}
+				}
+				// OpenAI voice + model
+				if body.OpenAIVoice == "" {
+					if v, exists := nodeData["voice"].(string); exists && v != "" {
+						body.OpenAIVoice = v
+					}
+				}
+				if body.OpenAIModel == "" {
+					if m, exists := nodeData["openaiModel"].(string); exists && m != "" {
+						body.OpenAIModel = m
+					}
+				}
+				// Qwen TTS settings
 				if body.TTSMode == "" {
 					if mode, exists := nodeData["ttsMode"].(string); exists && mode != "" {
 						body.TTSMode = mode
@@ -136,6 +159,15 @@ func Talk(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	}
 
 	// Defaults
+	if body.TTSProvider == "" {
+		body.TTSProvider = "qwen3"
+	}
+	if body.OpenAIVoice == "" {
+		body.OpenAIVoice = "alloy"
+	}
+	if body.OpenAIModel == "" {
+		body.OpenAIModel = "tts-1"
+	}
 	if body.TTSMode == "" {
 		body.TTSMode = "custom"
 	}
@@ -192,7 +224,42 @@ func Talk(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		}
 	}
 
-	// Build AI backend request
+	t0Talk := time.Now()
+
+	// ---- Try direct LLM call (OpenAI / Ollama) bypassing Python ----
+	if direct, handled, err := tryDirectLLMCall(nodes, body.Message, body.ConversationHistory, userAPIKey); handled {
+		if err != nil {
+			log.Printf("[ERROR] Direct LLM /talk failed: %v", err)
+			return c.Status(http.StatusBadGateway).JSON(fiber.Map{"error": err.Error()})
+		}
+		ms := float64(time.Since(t0Talk).Milliseconds())
+		sentences := SplitSentences(direct.Response)
+		cacheKey := MakeCacheKey(direct.Response, body.TTSProvider, body.OpenAIVoice, body.OpenAIModel)
+		log.Printf("[MANJU_TIMING] /talk direct project=%s ms=%.1f model=%s", c.Params("id"), ms, direct.ModelUsed)
+		return c.JSON(fiber.Map{
+			"text_response":     direct.Response,
+			"sentences":         sentences,
+			"cache_key":         cacheKey,
+			"model_used":        direct.ModelUsed,
+			"processing_time_ms": ms,
+			"nodes_executed":    direct.Nodes,
+			"tts_provider":      body.TTSProvider,
+			"tts_settings": fiber.Map{
+				"tts_mode":           body.TTSMode,
+				"voice_name":         body.VoiceName,
+				"instruction":        body.Instruction,
+				"voice_description":  body.VoiceDescription,
+				"reference_voice_id": body.ReferenceVoiceID,
+				"use_fast_mode":      body.UseFastMode,
+			},
+			"openai_tts": fiber.Map{
+				"voice": body.OpenAIVoice,
+				"model": body.OpenAIModel,
+			},
+		})
+	}
+
+	// ---- Fall back to Python AI service ----
 	aiPayload := map[string]interface{}{
 		"message": body.Message,
 		"workflow": map[string]interface{}{
@@ -202,6 +269,9 @@ func Talk(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		"conversation_history": body.ConversationHistory,
 		"session_id":           body.SessionID,
 		"openai_api_key":       userAPIKey,
+		"tts_provider":         body.TTSProvider,
+		"openai_voice":         body.OpenAIVoice,
+		"openai_model":         body.OpenAIModel,
 		"tts_mode":             body.TTSMode,
 		"voice_name":           body.VoiceName,
 		"instruction":          body.Instruction,
@@ -218,12 +288,7 @@ func Talk(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	aiURL := getQwenTTSServiceURL() + "/talk"
 	log.Printf("[DEBUG] Calling AI /talk at: %s", aiURL)
 
-	// Use transport-level timeouts so the body stream is NOT killed mid-read.
-	// Client.Timeout covers the ENTIRE request lifecycle including body reading;
-	// for streaming responses that can take minutes, we only want a header timeout.
-	transport := &http.Transport{
-		ResponseHeaderTimeout: 180 * time.Second,
-	}
+	transport := &http.Transport{ResponseHeaderTimeout: 180 * time.Second}
 	client := &http.Client{Transport: transport}
 
 	req, err := http.NewRequest("POST", aiURL, bytes.NewBuffer(reqBody))
@@ -245,8 +310,6 @@ func Talk(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		return c.Status(resp.StatusCode).JSON(fiber.Map{"error": "AI /talk error: " + string(bodyBytes)})
 	}
 
-	// /talk now returns JSON (text + sentences + cache_key + metadata).
-	// Simply proxy the JSON body through.
 	c.Set("Content-Type", "application/json")
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {

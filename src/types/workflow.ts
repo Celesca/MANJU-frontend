@@ -27,7 +27,7 @@ export interface WorkflowNode {
 // Node-specific data types
 export interface AIModelData {
   modelName: string;
-  provider: 'openai' | 'anthropic' | 'google' | 'custom';
+  provider: 'openai' | 'anthropic' | 'google' | 'custom' | 'ollama';
   systemPrompt: string;
   temperature: number;
   maxTokens: number;
@@ -35,6 +35,7 @@ export interface AIModelData {
   selectedApiKeyId?: string; // Selected API key ID from user's saved keys
   expectedOutput?: string; // Expected output format for if-condition matching (e.g., "YES or NO")
   outputVariable?: string; // Variable name to store the output for use in conditions
+  ollamaUrl?: string; // Ollama server URL (e.g. http://localhost:11434)
 }
 
 export interface RAGDocumentData {
@@ -78,6 +79,9 @@ export interface VoiceOutputData {
   referenceVoiceFilename?: string;  // Display name of uploaded reference
   refTranscript?: string;  // Transcript of reference audio
   useFastMode: boolean;  // Fast mode for voice cloning
+  // OpenAI TTS specific
+  openaiApiKey?: string;  // OpenAI API key for TTS (optional override)
+  openaiModel?: string;   // OpenAI TTS model (tts-1, tts-1-hd, gpt-4o-audio-preview, etc.)
 }
 
 export interface TextInputData {
