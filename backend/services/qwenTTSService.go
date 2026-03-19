@@ -223,6 +223,17 @@ func Talk(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 			userAPIKey, _ = DecryptAPIKey(user.EncryptedAPIKey)
 		}
 	}
+	// Final fallback: inline openaiApiKey stored in any node's data
+	if userAPIKey == "" {
+		for _, node := range nodes {
+			if data, ok := node["data"].(map[string]interface{}); ok {
+				if k, ok := data["openaiApiKey"].(string); ok && k != "" {
+					userAPIKey = k
+					break
+				}
+			}
+		}
+	}
 
 	t0Talk := time.Now()
 

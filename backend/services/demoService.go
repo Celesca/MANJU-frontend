@@ -387,6 +387,19 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		}
 	}
 
+	// Final fallback: inline openaiApiKey stored directly in any node's data
+	// (covers keys entered in the VoiceOutput or AIModel node config panels)
+	if userAPIKey == "" {
+		for _, node := range nodes {
+			if data, ok := node["data"].(map[string]interface{}); ok {
+				if k, ok := data["openaiApiKey"].(string); ok && k != "" {
+					userAPIKey = k
+					break
+				}
+			}
+		}
+	}
+
 	t0 := time.Now()
 
 	// ---- Try direct LLM call (OpenAI / Ollama) bypassing Python ----
