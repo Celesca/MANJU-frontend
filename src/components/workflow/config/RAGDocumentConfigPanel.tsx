@@ -49,12 +49,22 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
         headers: {
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          embedding_model: formData.embeddingModel,
+          chunk_size: formData.chunkSize,
+          chunk_overlap: formData.chunkOverlap,
+        }),
       });
 
-      const result = await res.json();
+      let result: { error?: string; message?: string } = {};
+      try {
+        result = await res.json();
+      } catch {
+        // non-JSON response
+      }
 
       if (!res.ok) {
-        throw new Error(result.error || 'Embedding failed');
+        throw new Error(result.error || `Embedding failed (${res.status})`);
       }
 
       setEmbedStatus('success');

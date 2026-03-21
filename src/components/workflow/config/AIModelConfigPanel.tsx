@@ -22,7 +22,7 @@ interface SavedAPIKey {
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
 const providers = [
-  { id: 'openai', name: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'] },
+  { id: 'openai', name: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo', 'gpt-5-nano', 'gpt-5.4-nano'] },
   { id: 'ollama', name: 'Ollama', models: [] }, // model entered freely; Ollama server handles it
 ];
 
