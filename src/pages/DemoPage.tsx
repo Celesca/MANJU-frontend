@@ -5,7 +5,8 @@ import {
   Send, User, Bot, Square,
   Settings, ChevronLeft,
   Volume2, Mic, AlertCircle,
-  Loader2, VolumeX, Zap
+  Loader2, VolumeX, Zap,
+  Download, Activity
 } from 'lucide-react';
 import { apiFetch } from '../utils/api';
 import { getCachedAudio, setCachedAudio, concatenateWavBlobs } from '../utils/audioCache';
@@ -20,6 +21,9 @@ interface Message {
   timestamp: Date;
   model_used?: string;
   processing_time_ms?: number;
+  asr_time_ms?: number;
+  llm_time_ms?: number;
+  tts_time_ms?: number;
   nodes_executed?: string[];
   audioUrl?: string; // For voice output
   audioCacheKey?: string; // IndexedDB cache key for replaying audio
@@ -31,6 +35,9 @@ interface TalkResult {
   cache_key: string;
   model_used?: string;
   processing_time_ms?: number;
+  asr_time_ms?: number;
+  llm_time_ms?: number;
+  tts_time_ms?: number;
   nodes_executed?: string[];
   tts_settings: {
     tts_mode: string;
@@ -64,6 +71,8 @@ interface WorkflowType {
   has_sheets: boolean;
   has_condition: boolean;
   tts_provider?: 'openai' | 'qwen3';
+  openai_voice?: string; // e.g. "alloy", "nova" — from voice-output node
+  openai_model?: string; // e.g. "tts-1", "gpt-4o-audio-preview"
 }
 
 export default function DemoPage() {
@@ -78,6 +87,7 @@ export default function DemoPage() {
   const [error, setError] = useState<string | null>(null);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [showDebug, setShowDebug] = useState(false);
+  const [verbose, setVerbose] = useState(false);
   const [workflowType, setWorkflowType] = useState<WorkflowType | null>(null);
 
   // Voice recording state
@@ -208,7 +218,9 @@ export default function DemoPage() {
 
       if (isQwen3Voice) {
         // Qwen3 TTS path — workflow → sentences → pipeline playback
+        const llmStart = Date.now();
         const talkResult = await callTalkEndpoint(mockTranscription, conversationHistory);
+        const llm_time_ms = Date.now() - llmStart;
         if (!talkResult) {
           throw new Error('Failed to get voice response from Qwen3 TTS');
         }
@@ -220,6 +232,9 @@ export default function DemoPage() {
           timestamp: new Date(),
           model_used: talkResult.model_used,
           processing_time_ms: talkResult.processing_time_ms,
+          asr_time_ms: talkResult.asr_time_ms,
+          llm_time_ms: talkResult.llm_time_ms ?? llm_time_ms,
+          tts_time_ms: talkResult.tts_time_ms,
           nodes_executed: talkResult.nodes_executed,
           audioCacheKey: talkResult.cache_key,
         };
@@ -227,10 +242,16 @@ export default function DemoPage() {
         setMessages(prev => [...prev, assistantMessage]);
         ttsCancelledRef.current = false;
         setPlayingAudioId(assistantMessage.id);
+        const ttsStart = Date.now();
         await playTTSPipeline(talkResult.sentences, talkResult.cache_key, talkResult.tts_settings);
+        const tts_time_ms = Date.now() - ttsStart;
         setPlayingAudioId(null);
+        if (talkResult.tts_time_ms === undefined) {
+          setMessages(prev => prev.map(m => m.id === assistantMessage.id ? { ...m, tts_time_ms } : m));
+        }
       } else {
         // Standard OpenAI TTS path
+        const llmStart = Date.now();
         const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/demo`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -249,6 +270,7 @@ export default function DemoPage() {
         }
 
         const data = await res.json();
+        const llm_time_ms = Date.now() - llmStart;
 
         const assistantMessage: Message = {
           id: `msg-${Date.now()}-assistant`,
@@ -257,6 +279,9 @@ export default function DemoPage() {
           timestamp: new Date(),
           model_used: data.model_used,
           processing_time_ms: data.processing_time_ms,
+          asr_time_ms: data.asr_time_ms,
+          llm_time_ms: data.llm_time_ms ?? llm_time_ms,
+          tts_time_ms: data.tts_time_ms,
           nodes_executed: data.nodes_executed,
         };
 
@@ -502,14 +527,15 @@ export default function DemoPage() {
         audioRef.current = null;
       }
 
+      const ttsStart = Date.now();
       const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
           text: text,
-          voice: 'alloy', // You can make this configurable
-          model: 'tts-1'
+          voice: workflowType?.openai_voice || 'alloy',
+          model: workflowType?.openai_model || 'tts-1',
         }),
       });
 
@@ -518,6 +544,15 @@ export default function DemoPage() {
       }
 
       const blob = await res.blob();
+      const tts_time_ms = Date.now() - ttsStart;
+
+      // Cache the blob and record timing so download + verbose work
+      if (messageId) {
+        const cacheKey = `openai-tts-${messageId}`;
+        await setCachedAudio(cacheKey, blob).catch(() => {});
+        setMessages(prev => prev.map(m => m.id === messageId ? { ...m, audioCacheKey: cacheKey, tts_time_ms } : m));
+      }
+
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audioRef.current = audio;
@@ -533,7 +568,6 @@ export default function DemoPage() {
     } catch (err) {
       console.error('TTS error:', err);
       setPlayingAudioId(null);
-      // Fallback to browser TTS if desired, or just show error
     }
   };
 
@@ -713,6 +747,55 @@ export default function DemoPage() {
     setPlayingAudioId(null);
   };
 
+  /** Download cached audio for a message as a WAV file. */
+  const downloadAudio = async (message: Message) => {
+    let blob: Blob | null = null;
+
+    if (message.audioCacheKey) {
+      try {
+        blob = await getCachedAudio(message.audioCacheKey);
+      } catch { /* ignore */ }
+    }
+
+    // Fallback: re-fetch from the appropriate TTS endpoint
+    if (!blob) {
+      try {
+        if (workflowType?.tts_provider === 'qwen3') {
+          const fd = new FormData();
+          fd.append('text', message.content);
+          const res = await apiFetch(`${API_BASE}/api/qwen-tts/text-to-voice`, {
+            method: 'POST',
+            credentials: 'include',
+            body: fd,
+          });
+          if (res.ok) blob = await res.blob();
+        } else {
+          const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/tts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              text: message.content,
+              voice: workflowType?.openai_voice || 'alloy',
+              model: workflowType?.openai_model || 'tts-1',
+            }),
+          });
+          if (res.ok) blob = await res.blob();
+        }
+      } catch { /* ignore */ }
+    }
+
+    if (!blob) return;
+
+    const ext = workflowType?.tts_provider === 'qwen3' ? 'wav' : 'mp3';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `voice-output-${message.id}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const sendMessage = useCallback(async () => {
     if (!inputValue.trim() || sending) return;
 
@@ -740,7 +823,9 @@ export default function DemoPage() {
 
       if (isQwen3Voice) {
         // ---- Qwen3 TTS path: /talk → JSON, then sentence pipeline ----
+        const llmStart = Date.now();
         const talkResult = await callTalkEndpoint(userMessage.content, conversationHistory);
+        const llm_time_ms = Date.now() - llmStart;
 
         if (!talkResult) {
           throw new Error('Failed to get voice response from Qwen3 TTS');
@@ -753,6 +838,9 @@ export default function DemoPage() {
           timestamp: new Date(),
           model_used: talkResult.model_used,
           processing_time_ms: talkResult.processing_time_ms,
+          asr_time_ms: talkResult.asr_time_ms,
+          llm_time_ms: talkResult.llm_time_ms ?? llm_time_ms,
+          tts_time_ms: talkResult.tts_time_ms,
           nodes_executed: talkResult.nodes_executed,
           audioCacheKey: talkResult.cache_key,
         };
@@ -760,10 +848,16 @@ export default function DemoPage() {
         setMessages(prev => [...prev, assistantMessage]);
         ttsCancelledRef.current = false;
         setPlayingAudioId(assistantMessage.id);
+        const ttsStart = Date.now();
         await playTTSPipeline(talkResult.sentences, talkResult.cache_key, talkResult.tts_settings);
+        const tts_time_ms = Date.now() - ttsStart;
         setPlayingAudioId(null);
+        if (talkResult.tts_time_ms === undefined) {
+          setMessages(prev => prev.map(m => m.id === assistantMessage.id ? { ...m, tts_time_ms } : m));
+        }
       } else {
         // ---- Standard path: /demo for text, then optionally OpenAI TTS ----
+        const llmStart = Date.now();
         const res = await apiFetch(`${API_BASE}/api/projects/${projectId}/demo`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -781,6 +875,7 @@ export default function DemoPage() {
         }
 
         const data = await res.json();
+        const llm_time_ms = Date.now() - llmStart;
 
         const assistantMessage: Message = {
           id: `msg-${Date.now()}-assistant`,
@@ -789,6 +884,9 @@ export default function DemoPage() {
           timestamp: new Date(),
           model_used: data.model_used,
           processing_time_ms: data.processing_time_ms,
+          asr_time_ms: data.asr_time_ms,
+          llm_time_ms: data.llm_time_ms ?? llm_time_ms,
+          tts_time_ms: data.tts_time_ms,
           nodes_executed: data.nodes_executed,
         };
 
@@ -859,6 +957,16 @@ export default function DemoPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setVerbose(v => !v)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                verbose ? 'bg-green-100 text-green-700' : 'text-gray-500 hover:bg-gray-100'
+              }`}
+              title="Toggle verbose execution info"
+            >
+              <Activity className="w-4 h-4" />
+              Verbose
+            </button>
             <button
               onClick={() => setShowDebug(!showDebug)}
               className={`p-2 rounded-lg transition-colors ${showDebug ? 'bg-purple-100 text-purple-700' : 'text-gray-500 hover:bg-gray-100'
@@ -955,7 +1063,7 @@ export default function DemoPage() {
 
                     {/* Voice output controls for assistant messages */}
                     {message.role === 'assistant' && workflowType?.output_type === 'voice' && (
-                      <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-2">
+                      <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-3 flex-wrap">
                         <button
                           onClick={() => {
                             if (playingAudioId === message.id) {
@@ -963,7 +1071,6 @@ export default function DemoPage() {
                             } else {
                               setPlayingAudioId(message.id);
                               if (workflowType?.tts_provider === 'qwen3') {
-                                // Play from cache or re-synthesize (no workflow re-run)
                                 (async () => {
                                   try {
                                     stopSpeaking();
@@ -984,23 +1091,82 @@ export default function DemoPage() {
                           className="flex items-center gap-1 text-xs text-purple-600 hover:text-purple-800 transition-colors"
                         >
                           {playingAudioId === message.id ? (
-                            <>
-                              <VolumeX className="w-4 h-4" />
-                              Stop
-                            </>
+                            <><VolumeX className="w-4 h-4" />Stop</>
                           ) : (
-                            <>
-                              <Volume2 className="w-4 h-4" />
-                              Play audio
-                            </>
+                            <><Volume2 className="w-4 h-4" />Play audio</>
                           )}
+                        </button>
+
+                        {/* Download voice output */}
+                        <button
+                          onClick={() => downloadAudio(message)}
+                          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+                          title="Download audio"
+                        >
+                          <Download className="w-4 h-4" />
+                          Download
                         </button>
                       </div>
                     )}
                   </div>
 
-                  {/* Debug info for assistant messages */}
-                  {showDebug && message.role === 'assistant' && (
+                  {/* Verbose execution info (shown when verbose is ON) */}
+                  {verbose && message.role === 'assistant' && (
+                    <div className="mt-2 px-3 py-2 bg-green-50 border border-green-100 rounded-lg text-xs space-y-1">
+                      <div className="font-semibold text-green-700 flex items-center gap-1">
+                        <Activity className="w-3 h-3" /> Execution Details
+                      </div>
+                      {message.model_used && (
+                        <div className="text-gray-600">
+                          <span className="font-medium">Model:</span> {message.model_used}
+                        </div>
+                      )}
+                      {message.processing_time_ms !== undefined && (
+                        <div className="text-gray-600">
+                          <span className="font-medium">Total time:</span>{' '}
+                          <span className="text-green-700 font-semibold">{message.processing_time_ms.toFixed(0)} ms</span>
+                        </div>
+                      )}
+                      {message.asr_time_ms !== undefined && (
+                        <div className="text-gray-600">
+                          <span className="font-medium">Time (ASR):</span>{' '}
+                          <span className="text-blue-700 font-semibold">{message.asr_time_ms.toFixed(0)} ms</span>
+                        </div>
+                      )}
+                      {message.llm_time_ms !== undefined && (
+                        <div className="text-gray-600">
+                          <span className="font-medium">Time (LLM):</span>{' '}
+                          <span className="text-purple-700 font-semibold">{message.llm_time_ms.toFixed(0)} ms</span>
+                        </div>
+                      )}
+                      {message.tts_time_ms !== undefined && (
+                        <div className="text-gray-600">
+                          <span className="font-medium">Time (TTS):</span>{' '}
+                          <span className="text-orange-700 font-semibold">{message.tts_time_ms.toFixed(0)} ms</span>
+                        </div>
+                      )}
+                      {message.nodes_executed && message.nodes_executed.length > 0 && (
+                        <div className="text-gray-600">
+                          <span className="font-medium">Nodes:</span>{' '}
+                          {message.nodes_executed.map((n, i) => (
+                            <span key={i}>
+                              <span className="inline-block px-1.5 py-0.5 bg-white border border-green-200 rounded text-[10px]">{n}</span>
+                              {i < message.nodes_executed!.length - 1 && <span className="mx-1 text-green-400">→</span>}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {workflowType?.output_type === 'voice' && (
+                        <div className="text-gray-600">
+                          <span className="font-medium">TTS provider:</span>{' '}
+                          {workflowType.tts_provider === 'qwen3' ? 'Qwen3-TTS' : 'OpenAI TTS'}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Debug info (shown when debug/settings is ON) */}
+                  {showDebug && message.role === 'assistant' && !verbose && (
                     <div className="mt-1 text-xs text-gray-400 flex items-center gap-2 flex-wrap">
                       {message.model_used && (
                         <span>Model: {message.model_used}</span>

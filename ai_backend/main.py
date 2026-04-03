@@ -150,9 +150,6 @@ class ChatResponse(BaseModel):
     model_used: Optional[str] = None
     processing_time_ms: float
     nodes_executed: List[str] = Field(default_factory=list)
-    t_ret_ms: Optional[float] = None    # RAG retrieval time (ms)
-    t_llm_ms: Optional[float] = None    # LLM total generation time (ms)
-    t_ttft_ms: Optional[float] = None   # Time-to-first-token (ms)
 
 
 class HealthResponse(BaseModel):
@@ -225,28 +222,12 @@ async def chat(request: ChatRequest):
         )
         
         processing_time = (datetime.now() - start_time).total_seconds() * 1000
-
-        t_ret = result.get("t_ret_ms")
-        t_llm = result.get("t_llm_ms")
-        t_ttft = result.get("t_ttft_ms")
-        logger.info(
-            "MANJU_TIMING /chat total_ms=%.1f t_ret_ms=%s t_llm_ms=%s t_ttft_ms=%s model=%s nodes=%s",
-            processing_time,
-            f"{t_ret:.1f}" if t_ret is not None else "N/A",
-            f"{t_llm:.1f}" if t_llm is not None else "N/A",
-            f"{t_ttft:.1f}" if t_ttft is not None else "N/A",
-            result.get("model_used", "unknown"),
-            result.get("nodes_executed", []),
-        )
-
+        
         return ChatResponse(
             response=result.get("response", "No response generated"),
             model_used=result.get("model_used"),
             processing_time_ms=processing_time,
             nodes_executed=result.get("nodes_executed", []),
-            t_ret_ms=t_ret,
-            t_llm_ms=t_llm,
-            t_ttft_ms=t_ttft,
         )
     
     except Exception as e:
@@ -388,13 +369,18 @@ def _make_cache_key(text: str, tts_mode: str, voice_name: str,
 # =============================================================================
 
 class TalkRequest(BaseModel):
-    """Request for /talk — runs workflow then synthesises voice via Qwen3-TTS."""
+    """Request for /talk — runs workflow then synthesises voice via Qwen3-TTS or OpenAI TTS."""
     message: str
     workflow: WorkflowConfig
     conversation_history: List[Dict[str, str]] = Field(default_factory=list)
     session_id: Optional[str] = None
     openai_api_key: Optional[str] = None
-    # Qwen TTS settings
+    # TTS provider selection
+    tts_provider: str = "qwen3"  # "openai" | "qwen3"
+    # OpenAI TTS settings (used when tts_provider="openai")
+    openai_voice: str = "alloy"
+    openai_model: str = "tts-1"
+    # Qwen TTS settings (used when tts_provider="qwen3")
     tts_mode: str = "custom"  # "custom" | "voice-clone" | "voice-design"
     voice_name: str = "serena"  # For custom voice mode
     instruction: Optional[str] = None  # Style instruction for custom voice
@@ -459,26 +445,19 @@ async def talk(request: TalkRequest):
 
     processing_time = (datetime.now() - start_time).total_seconds() * 1000
 
-    t_ret = result.get("t_ret_ms")
-    t_llm = result.get("t_llm_ms")
-    t_ttft = result.get("t_ttft_ms")
-    logger.info(
-        "MANJU_TIMING /talk total_ms=%.1f t_ret_ms=%s t_llm_ms=%s t_ttft_ms=%s model=%s",
-        processing_time,
-        f"{t_ret:.1f}" if t_ret is not None else "N/A",
-        f"{t_llm:.1f}" if t_llm is not None else "N/A",
-        f"{t_ttft:.1f}" if t_ttft is not None else "N/A",
-        result.get("model_used", "unknown"),
-    )
-
     # Step 2 — Split text into sentence chunks for client-side TTS pipeline
     sentences = split_text_for_tts(text_response, max_chars=200)
 
-    # Step 3 — Generate cache key
-    cache_key = _make_cache_key(
-        text_response, request.tts_mode, request.voice_name,
-        request.instruction, request.voice_description,
-    )
+    # Step 3 — Generate cache key (provider-aware so OpenAI and Qwen don't collide)
+    if request.tts_provider == "openai":
+        cache_key = _make_cache_key(
+            text_response, f"openai_{request.openai_model}", request.openai_voice,
+        )
+    else:
+        cache_key = _make_cache_key(
+            text_response, request.tts_mode, request.voice_name,
+            request.instruction, request.voice_description,
+        )
 
     return {
         "text_response": text_response,
@@ -486,10 +465,9 @@ async def talk(request: TalkRequest):
         "cache_key": cache_key,
         "model_used": result.get("model_used") or "",
         "processing_time_ms": round(processing_time, 2),
-        "t_ret_ms": round(t_ret, 2) if t_ret is not None else None,
-        "t_llm_ms": round(t_llm, 2) if t_llm is not None else None,
-        "t_ttft_ms": round(t_ttft, 2) if t_ttft is not None else None,
         "nodes_executed": result.get("nodes_executed", []),
+        # tts_provider tells the frontend which pipeline to use for audio synthesis
+        "tts_provider": request.tts_provider,
         "tts_settings": {
             "tts_mode": request.tts_mode,
             "voice_name": request.voice_name,
@@ -497,6 +475,11 @@ async def talk(request: TalkRequest):
             "voice_description": request.voice_description,
             "reference_voice_id": request.reference_voice_id,
             "use_fast_mode": request.use_fast_mode,
+        },
+        # OpenAI TTS params forwarded to Go /tts endpoint if tts_provider=openai
+        "openai_tts": {
+            "voice": request.openai_voice,
+            "model": request.openai_model,
         },
     }
 
@@ -524,7 +507,6 @@ async def tts_sentence(request: TTSSentenceRequest):
     if http_client is None:
         raise HTTPException(status_code=503, detail="HTTP client not initialized")
 
-    _t_tts_start = datetime.now()
     try:
         audio_bytes = await _qwen_tts_synthesize(
             text=request.text,
@@ -539,18 +521,7 @@ async def tts_sentence(request: TTSSentenceRequest):
         logger.exception("Error in /tts-sentence")
         raise HTTPException(status_code=502, detail=str(e))
 
-    t_tts_ms = (datetime.now() - _t_tts_start).total_seconds() * 1000
-    logger.info(
-        "MANJU_TIMING /tts-sentence t_tts_ms=%.1f chars=%d mode=%s",
-        t_tts_ms, len(request.text), request.tts_mode,
-    )
-
-    from fastapi.responses import Response as FastAPIResponse
-    return FastAPIResponse(
-        content=audio_bytes,
-        media_type="audio/wav",
-        headers={"X-Synthesis-Time-Ms": f"{t_tts_ms:.1f}"},
-    )
+    return StreamingResponse(iter([audio_bytes]), media_type="audio/wav")
 
 
 @app.post("/talk/text-to-voice")

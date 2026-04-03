@@ -2,16 +2,249 @@ package services
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"manju/backend/repository"
 	"net/http"
 	"os"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 )
+
+// =============================================================================
+// Direct LLM helpers — call OpenAI / Ollama without the Python service
+// =============================================================================
+
+type directLLMResult struct {
+	Response  string
+	ModelUsed string
+	Nodes     []string
+}
+
+// needsPythonWorkflow returns true when any node requires the Python workflow
+// executor (RAG, Google Sheets, if-condition). Simple chat nodes are fine.
+func needsPythonWorkflow(nodes []map[string]interface{}) bool {
+	for _, node := range nodes {
+		t, _ := node["type"].(string)
+		if t == "rag-documents" || t == "google-sheets" || t == "if-condition" {
+			return true
+		}
+	}
+	return false
+}
+
+// findAIModelData returns the data map of the first ai-model node, or nil.
+func findAIModelData(nodes []map[string]interface{}) map[string]interface{} {
+	for _, node := range nodes {
+		if t, _ := node["type"].(string); t == "ai-model" {
+			if data, ok := node["data"].(map[string]interface{}); ok {
+				return data
+			}
+		}
+	}
+	return nil
+}
+
+// buildChatMessages combines optional systemPrompt + history + current message
+// into the OpenAI-compatible message array.
+func buildChatMessages(systemPrompt string, history []map[string]interface{}, message string) []map[string]interface{} {
+	msgs := make([]map[string]interface{}, 0, len(history)+2)
+	if systemPrompt != "" {
+		msgs = append(msgs, map[string]interface{}{"role": "system", "content": systemPrompt})
+	}
+	for _, h := range history {
+		role, _ := h["role"].(string)
+		content, _ := h["content"].(string)
+		if role != "" && content != "" {
+			msgs = append(msgs, map[string]interface{}{"role": role, "content": content})
+		}
+	}
+	msgs = append(msgs, map[string]interface{}{"role": "user", "content": message})
+	return msgs
+}
+
+// callOpenAIDirect posts to OpenAI /v1/chat/completions and returns the text reply.
+func callOpenAIDirect(apiKey, model, systemPrompt string, history []map[string]interface{}, message string, temperature float64, maxTokens int) (string, error) {
+	if model == "" {
+		model = "gpt-4o-mini"
+	}
+	if temperature == 0 {
+		temperature = 0.7
+	}
+	if maxTokens == 0 {
+		maxTokens = 1000
+	}
+	payload := map[string]interface{}{
+		"model":       model,
+		"messages":    buildChatMessages(systemPrompt, history, message),
+		"temperature": temperature,
+		"max_tokens":  maxTokens,
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("OpenAI request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("OpenAI returned %d: %s", resp.StatusCode, respBody)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("parse OpenAI response: %w", err)
+	}
+	choices, _ := result["choices"].([]interface{})
+	if len(choices) == 0 {
+		return "", fmt.Errorf("no choices in OpenAI response")
+	}
+	choice, _ := choices[0].(map[string]interface{})
+	msg, _ := choice["message"].(map[string]interface{})
+	content, _ := msg["content"].(string)
+	return content, nil
+}
+
+// callOllamaDirect posts to Ollama /api/chat and returns the text reply.
+func callOllamaDirect(ollamaURL, model, systemPrompt string, history []map[string]interface{}, message string) (string, error) {
+	if ollamaURL == "" {
+		ollamaURL = "http://localhost:11434"
+	}
+	if model == "" {
+		model = "llama3.2"
+	}
+	payload := map[string]interface{}{
+		"model":    model,
+		"messages": buildChatMessages(systemPrompt, history, message),
+		"stream":   false,
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequest("POST", ollamaURL+"/api/chat", bytes.NewBuffer(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Ollama request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Ollama returned %d: %s", resp.StatusCode, respBody)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("parse Ollama response: %w", err)
+	}
+	msg, _ := result["message"].(map[string]interface{})
+	content, _ := msg["content"].(string)
+	return content, nil
+}
+
+// tryDirectLLMCall attempts to run a simple workflow entirely in Go.
+//
+// Returns:
+//   - (result, true, nil)  — success, use this result
+//   - (nil, true, err)     — provider was detected but call failed (return error to client)
+//   - (nil, false, nil)    — workflow needs Python (RAG / Sheets / conditions / unknown provider)
+func tryDirectLLMCall(nodes []map[string]interface{}, message string, history []map[string]interface{}, apiKey string) (*directLLMResult, bool, error) {
+	if needsPythonWorkflow(nodes) {
+		return nil, false, nil
+	}
+	aiData := findAIModelData(nodes)
+	if aiData == nil {
+		return nil, false, nil
+	}
+
+	provider, _ := aiData["provider"].(string)
+	if provider != "openai" && provider != "ollama" {
+		return nil, false, nil
+	}
+
+	modelName, _ := aiData["modelName"].(string)
+	systemPrompt, _ := aiData["systemPrompt"].(string)
+	temperature, _ := aiData["temperature"].(float64)
+	maxTokensF, _ := aiData["maxTokens"].(float64)
+	maxTokens := int(maxTokensF)
+
+	var response string
+	var err error
+
+	switch provider {
+	case "openai":
+		if apiKey == "" {
+			return nil, true, fmt.Errorf("OpenAI API key not configured. Add one in Settings or the AI Model node.")
+		}
+		response, err = callOpenAIDirect(apiKey, modelName, systemPrompt, history, message, temperature, maxTokens)
+		if err != nil {
+			return nil, true, err
+		}
+	case "ollama":
+		ollamaURL, _ := aiData["ollamaUrl"].(string)
+		response, err = callOllamaDirect(ollamaURL, modelName, systemPrompt, history, message)
+		if err != nil {
+			return nil, true, err
+		}
+	}
+
+	displayModel := provider + "/" + modelName
+	return &directLLMResult{
+		Response:  response,
+		ModelUsed: displayModel,
+		Nodes:     []string{"text-input", "ai-model", "text-output"},
+	}, true, nil
+}
+
+// SplitSentences splits text into sentence-sized chunks for client-side TTS pipeline.
+var sentenceRe = regexp.MustCompile(`[^.!?।]+[.!?।]+`)
+
+func SplitSentences(text string) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return []string{}
+	}
+	matches := sentenceRe.FindAllString(text, -1)
+	if len(matches) == 0 {
+		return []string{text}
+	}
+	// Collect remainder after last punctuation
+	last := matches[len(matches)-1]
+	idx := strings.LastIndex(text, last) + len(last)
+	if idx < len(text) {
+		rest := strings.TrimSpace(text[idx:])
+		if rest != "" {
+			matches = append(matches, rest)
+		}
+	}
+	for i := range matches {
+		matches[i] = strings.TrimSpace(matches[i])
+	}
+	return matches
+}
+
+// MakeCacheKey returns a short SHA-256 hex key for the given text + provider settings.
+func MakeCacheKey(parts ...string) string {
+	h := sha256.New()
+	for _, p := range parts {
+		h.Write([]byte(p + "|"))
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))[:24]
+}
 
 // DemoChatRequest represents the chat request to the AI service
 type DemoChatRequest struct {
@@ -154,7 +387,38 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		}
 	}
 
-	// Build request to AI service
+	// Final fallback: inline openaiApiKey stored directly in any node's data
+	// (covers keys entered in the VoiceOutput or AIModel node config panels)
+	if userAPIKey == "" {
+		for _, node := range nodes {
+			if data, ok := node["data"].(map[string]interface{}); ok {
+				if k, ok := data["openaiApiKey"].(string); ok && k != "" {
+					userAPIKey = k
+					break
+				}
+			}
+		}
+	}
+
+	t0 := time.Now()
+
+	// ---- Try direct LLM call (OpenAI / Ollama) bypassing Python ----
+	if direct, handled, err := tryDirectLLMCall(nodes, body.Message, body.ConversationHistory, userAPIKey); handled {
+		if err != nil {
+			log.Printf("[ERROR] Direct LLM call failed: %v", err)
+			return c.Status(http.StatusBadGateway).JSON(fiber.Map{"error": err.Error()})
+		}
+		ms := float64(time.Since(t0).Milliseconds())
+		log.Printf("[MANJU_TIMING] /demo direct project=%s ms=%.1f model=%s", projectID, ms, direct.ModelUsed)
+		return c.JSON(DemoChatResponse{
+			Response:         direct.Response,
+			ModelUsed:        direct.ModelUsed,
+			ProcessingTimeMs: ms,
+			NodesExecuted:    direct.Nodes,
+		})
+	}
+
+	// ---- Fall back to Python AI service ----
 	aiRequest := DemoChatRequest{
 		Message: body.Message,
 		Workflow: WorkflowConfig{
@@ -171,7 +435,6 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to build request"})
 	}
 
-	// Call AI service
 	aiServiceURL := getAIServiceURL() + "/chat"
 	log.Printf("[DEBUG] Calling AI service at: %s", aiServiceURL)
 	client := &http.Client{Timeout: 60 * time.Second}
@@ -183,11 +446,9 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Key", os.Getenv("MANJU_API_KEY"))
 
-	t0 := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("[ERROR] AI service call failed: %v", err)
-		// If AI service is not available, return a mock response
 		return c.JSON(DemoChatResponse{
 			Response:         "[Demo Mode] AI service is not available. Message received: " + body.Message,
 			ModelUsed:        "mock",
@@ -197,13 +458,11 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 	}
 	defer resp.Body.Close()
 
-	// Read response
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to read AI response"})
 	}
 
-	// Check for error response
 	if resp.StatusCode != http.StatusOK {
 		var errorResp map[string]interface{}
 		if err := json.Unmarshal(responseBody, &errorResp); err == nil {
@@ -212,7 +471,6 @@ func DemoProject(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		return c.Status(resp.StatusCode).JSON(fiber.Map{"error": "AI service error"})
 	}
 
-	// Parse and return response
 	var aiResponse DemoChatResponse
 	if err := json.Unmarshal(responseBody, &aiResponse); err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to parse AI response"})
@@ -349,7 +607,9 @@ type WorkflowTypeResponse struct {
 	HasRAG       bool   `json:"has_rag"`
 	HasSheets    bool   `json:"has_sheets"`
 	HasCondition bool   `json:"has_condition"`
-	TTSProvider  string `json:"tts_provider,omitempty"` // "openai" | "qwen3"
+	TTSProvider  string `json:"tts_provider,omitempty"`   // "openai" | "qwen3"
+	OpenAIVoice  string `json:"openai_voice,omitempty"`   // e.g. "alloy"
+	OpenAIModel  string `json:"openai_model,omitempty"`   // e.g. "tts-1", "gpt-4o-audio-preview"
 }
 
 // GetWorkflowType detects the workflow input/output modalities
@@ -433,13 +693,21 @@ func GetWorkflowType(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 			outputType = "voice"
 		}
 
-		// Detect TTS provider from voice-output node data
+		// Detect TTS provider + OpenAI voice/model from voice-output node data
 		ttsProvider := "openai"
+		openaiVoice := "alloy"
+		openaiModel := "tts-1"
 		for _, node := range nodes {
 			if t, ok := node["type"].(string); ok && t == "voice-output" {
 				if data, ok := node["data"].(map[string]interface{}); ok {
 					if provider, ok := data["ttsProvider"].(string); ok && provider != "" {
 						ttsProvider = provider
+					}
+					if voice, ok := data["voice"].(string); ok && voice != "" {
+						openaiVoice = voice
+					}
+					if model, ok := data["openaiModel"].(string); ok && model != "" {
+						openaiModel = model
 					}
 				}
 				break
@@ -454,6 +722,8 @@ func GetWorkflowType(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 			HasSheets:    contains(nodeTypes, "google-sheets"),
 			HasCondition: contains(nodeTypes, "if-condition"),
 			TTSProvider:  ttsProvider,
+			OpenAIVoice:  openaiVoice,
+			OpenAIModel:  openaiModel,
 		})
 	}
 	defer resp.Body.Close()
@@ -469,6 +739,29 @@ func GetWorkflowType(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to parse response"})
 	}
 
+	// Python /workflow-type doesn't know about openaiModel/openaiVoice — enrich from node data
+	if workflowTypeResponse.OpenAIVoice == "" || workflowTypeResponse.OpenAIModel == "" {
+		for _, node := range nodes {
+			if t, ok := node["type"].(string); ok && t == "voice-output" {
+				if data, ok := node["data"].(map[string]interface{}); ok {
+					if v, ok := data["voice"].(string); ok && v != "" {
+						workflowTypeResponse.OpenAIVoice = v
+					}
+					if m, ok := data["openaiModel"].(string); ok && m != "" {
+						workflowTypeResponse.OpenAIModel = m
+					}
+				}
+				break
+			}
+		}
+		if workflowTypeResponse.OpenAIVoice == "" {
+			workflowTypeResponse.OpenAIVoice = "alloy"
+		}
+		if workflowTypeResponse.OpenAIModel == "" {
+			workflowTypeResponse.OpenAIModel = "tts-1"
+		}
+	}
+
 	return c.JSON(workflowTypeResponse)
 }
 
@@ -479,89 +772,116 @@ type TTSRequest struct {
 	Model string `json:"model"`
 }
 
-// GenerateTTS proxies the TTS request to the AI service and streams the response
+// GenerateTTS calls OpenAI TTS directly and streams audio back to the frontend.
+// It reads voice/model from the request body and resolves the API key from:
+//  1. openaiApiKey stored in the project's voice-output node (user override)
+//  2. The user's default saved API key
+//  3. The legacy single encrypted key field
 func GenerateTTS(c *fiber.Ctx, repo *repository.ProjectRepository) error {
-	// Get user ID from context
+	// Auth check
 	userIDStr := c.Locals("userID")
 	if userIDStr == nil {
 		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 	}
 
-	// Get project ID from params
 	projectID := c.Params("id")
 	if projectID == "" {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "project id required"})
 	}
 
-	// Get project from database
 	project, err := repo.GetByID(projectID)
 	if err != nil {
 		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "project not found"})
 	}
-
-	// Verify ownership
 	if project.UserID.String() != userIDStr.(string) {
 		return c.Status(http.StatusForbidden).JSON(fiber.Map{"error": "access denied"})
 	}
 
-	// Parse request body
+	// Parse request body (voice + model come from DemoPage)
 	var body TTSRequest
 	if err := c.BodyParser(&body); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid payload"})
 	}
+	if body.Voice == "" {
+		body.Voice = "alloy"
+	}
+	if body.Model == "" {
+		body.Model = "tts-1"
+	}
 
-	// Retrieve API key for TTS
-	var userAPIKey string
-	keyRepo := repository.NewUserAPIKeyRepository(repository.GetDB())
-	defaultKey, err := keyRepo.GetDefaultByUserID(userIDStr.(string))
-	if err == nil && defaultKey != nil {
-		userAPIKey, _ = DecryptAPIKey(defaultKey.EncryptedKey)
-	} else {
-		// Fallback to legacy key
-		userRepo := repository.New(repository.GetDB())
-		user, err := userRepo.GetByID(userIDStr.(string))
-		if err == nil && user != nil && user.EncryptedAPIKey != "" {
-			userAPIKey, _ = DecryptAPIKey(user.EncryptedAPIKey)
+	// ---- Resolve API key ----
+	// 1. Check voice-output node for an openaiApiKey override stored in the workflow
+	var apiKeyOverride string
+	var nodes []map[string]interface{}
+	if err := json.Unmarshal(project.Nodes, &nodes); err == nil {
+		for _, node := range nodes {
+			if t, ok := node["type"].(string); ok && t == "voice-output" {
+				if data, ok := node["data"].(map[string]interface{}); ok {
+					if k, ok := data["openaiApiKey"].(string); ok && k != "" {
+						apiKeyOverride = k
+					}
+				}
+				break
+			}
 		}
 	}
 
-	// Add API key to request
-	type TTSRequestWithKey struct {
-		TTSRequest
-		OpenAIAPIKey string `json:"openai_api_key,omitempty"`
+	apiKey := apiKeyOverride
+	if apiKey == "" {
+		// 2. User's default saved key
+		keyRepo := repository.NewUserAPIKeyRepository(repository.GetDB())
+		defaultKey, err := keyRepo.GetDefaultByUserID(userIDStr.(string))
+		if err == nil && defaultKey != nil {
+			apiKey, _ = DecryptAPIKey(defaultKey.EncryptedKey)
+		}
+	}
+	if apiKey == "" {
+		// 3. Legacy single key field
+		userRepo := repository.New(repository.GetDB())
+		u, err := userRepo.GetByID(userIDStr.(string))
+		if err == nil && u != nil && u.EncryptedAPIKey != "" {
+			apiKey, _ = DecryptAPIKey(u.EncryptedAPIKey)
+		}
+	}
+	if apiKey == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "OpenAI API key not configured. Add one in Settings or the Voice Output node.",
+		})
 	}
 
-	requestWithKey := TTSRequestWithKey{
-		TTSRequest:   body,
-		OpenAIAPIKey: userAPIKey,
+	// ---- Call OpenAI TTS directly ----
+	ttsPayload := map[string]interface{}{
+		"model": body.Model,
+		"voice": body.Voice,
+		"input": body.Text,
 	}
-
-	requestBody, err := json.Marshal(requestWithKey)
+	ttsPayloadJSON, err := json.Marshal(ttsPayload)
 	if err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to build request"})
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to build TTS request"})
 	}
 
-	// Call AI service TTS endpoint
-	aiServiceURL := getAIServiceURL() + "/tts"
-	client := &http.Client{Timeout: 30 * time.Second}
-
-	req, err := http.NewRequest("POST", aiServiceURL, bytes.NewBuffer(requestBody))
+	openAIClient := &http.Client{Timeout: 30 * time.Second}
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/audio/speech", bytes.NewBuffer(ttsPayloadJSON))
 	if err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create request"})
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create TTS request"})
 	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", os.Getenv("MANJU_API_KEY"))
 
-	resp, err := client.Do(req)
+	resp, err := openAIClient.Do(req)
 	if err != nil {
-		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": "AI service unavailable"})
+		log.Printf("[ERROR] OpenAI TTS call failed: %v", err)
+		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": "Failed to reach OpenAI TTS"})
 	}
-	// Note: We don't defer resp.Body.Close() here because we'll stream it
 
-	// Set response headers
+	if resp.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		log.Printf("[ERROR] OpenAI TTS returned %d: %s", resp.StatusCode, errBody)
+		return c.Status(resp.StatusCode).JSON(fiber.Map{"error": string(errBody)})
+	}
+
 	c.Set("Content-Type", "audio/mpeg")
 	c.Set("Content-Disposition", "attachment; filename=\"speech.mp3\"")
-
-	// Stream the response from AI service to frontend
 	return c.SendStream(resp.Body)
 }

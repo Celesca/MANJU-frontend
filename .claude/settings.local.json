@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build:*)",
+      "Bash(find 'c:\\\\Users\\\\Sawit\\\\Desktop\\\\MANJU Universe\\\\MANJU-frontend' -maxdepth 2 -type f -name *.env*)",
+      "Bash(grep -E \"^-.*\\\\.\\(json|ts|js|md\\)$\")"
+    ]
+  }
+}

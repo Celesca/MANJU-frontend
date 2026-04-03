@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { X, Volume2, Upload, Mic, Trash2, Loader2, RefreshCw } from 'lucide-react';
+import { X, Volume2, Upload, Mic, Trash2, Loader2, RefreshCw, Key } from 'lucide-react';
 import type { VoiceOutputData } from '../../../types/workflow';
 import { apiFetch } from '../../../utils/api';
 
@@ -35,6 +35,14 @@ const OPENAI_VOICES = [
   { id: 'shimmer', label: 'Shimmer' },
 ];
 
+// OpenAI TTS models
+const OPENAI_TTS_MODELS = [
+  { id: 'tts-1', label: 'TTS-1', desc: 'Optimized for speed' },
+  { id: 'tts-1-hd', label: 'TTS-1 HD', desc: 'Higher quality' },
+  { id: 'gpt-4o-audio-preview', label: 'GPT-4o Audio', desc: 'Latest audio model' },
+  { id: 'gpt-4o-mini-audio-preview', label: 'GPT-4o Mini Audio', desc: 'Fast & affordable' },
+];
+
 interface VoiceReference {
   id: string;
   filename: string;
@@ -56,7 +64,10 @@ export default function VoiceOutputConfigPanel({ data, onSave, onClose }: VoiceO
     referenceVoiceFilename: data.referenceVoiceFilename || '',
     refTranscript: data.refTranscript || '',
     useFastMode: data.useFastMode !== undefined ? data.useFastMode : true,
+    openaiApiKey: data.openaiApiKey || '',
+    openaiModel: data.openaiModel || 'tts-1',
   });
+  const [showApiKey, setShowApiKey] = useState(false);
 
   const [voiceRefs, setVoiceRefs] = useState<VoiceReference[]>([]);
   const [loadingRefs, setLoadingRefs] = useState(false);
@@ -227,6 +238,28 @@ export default function VoiceOutputConfigPanel({ data, onSave, onClose }: VoiceO
         {/* ======================== OpenAI Configuration ======================== */}
         {formData.ttsProvider === 'openai' && (
           <>
+            {/* TTS Model */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">TTS Model</label>
+              <div className="grid grid-cols-2 gap-2">
+                {OPENAI_TTS_MODELS.map(m => (
+                  <button
+                    key={m.id}
+                    onClick={() => setFormData(prev => ({ ...prev, openaiModel: m.id }))}
+                    className={`px-3 py-2 rounded-lg border text-left transition-colors ${
+                      formData.openaiModel === m.id
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 bg-white hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="text-xs font-medium text-gray-800">{m.label}</div>
+                    <div className="text-[10px] text-gray-400">{m.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Voice */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Voice</label>
               <div className="grid grid-cols-3 gap-2">
@@ -246,6 +279,7 @@ export default function VoiceOutputConfigPanel({ data, onSave, onClose }: VoiceO
               </div>
             </div>
 
+            {/* Speed */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Speed: {formData.speed}x</label>
               <input
@@ -257,6 +291,31 @@ export default function VoiceOutputConfigPanel({ data, onSave, onClose }: VoiceO
                 onChange={(e) => setFormData(prev => ({ ...prev, speed: parseFloat(e.target.value) }))}
                 className="w-full accent-blue-600"
               />
+            </div>
+
+            {/* OpenAI API Key */}
+            <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+                <Key className="w-4 h-4 text-blue-600" />
+                OpenAI API Key <span className="text-gray-400 font-normal">(optional override)</span>
+              </label>
+              <div className="relative">
+                <input
+                  type={showApiKey ? 'text' : 'password'}
+                  value={formData.openaiApiKey || ''}
+                  onChange={(e) => setFormData(prev => ({ ...prev, openaiApiKey: e.target.value }))}
+                  placeholder="sk-... (uses server default if empty)"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-16"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowApiKey(p => !p)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-blue-600 hover:text-blue-800"
+                >
+                  {showApiKey ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">Leave blank to use the server-configured key.</p>
             </div>
           </>
         )}
