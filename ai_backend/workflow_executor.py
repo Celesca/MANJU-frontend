@@ -137,7 +137,8 @@ class WorkflowState(TypedDict):
     t_ret_ms: Optional[float]    # RAG retrieval: embed query + FAISS search
     t_llm_ms: Optional[float]    # LLM total generation time
     t_ttft_ms: Optional[float]   # Time-to-first-token from LLM
-
+    t_tts_ms: Optional[float]    # Text-to-Speech generation time
+    t_e2e_ms: Optional[float]    # End-to-end execution time
 
 # =============================================================================
 # Document Loading Helpers
@@ -1045,6 +1046,9 @@ class WorkflowExecutor:
     ) -> Dict[str, Any]:
         """Execute a workflow with the given message."""
         
+        # === [เพิ่ม] เริ่มจับเวลา End-to-End ตั้งแต่เริ่มฟังก์ชัน ===
+        t_e2e_start = datetime.now()
+        
         # Build the graph
         try:
             graph = self._build_graph(workflow)
@@ -1070,22 +1074,34 @@ class WorkflowExecutor:
             "model_used": None,
             "output_variables": {},  # Track AI outputs for conditions
             "openai_api_key": openai_api_key,  # User-provided API key
+            
+            # === [อัปเดต] ใส่ค่าเริ่มต้นให้ครบ 5 ตัว ===
             "t_ret_ms": None,
             "t_llm_ms": None,
             "t_ttft_ms": None,
+            "t_tts_ms": None,
+            "t_e2e_ms": None,
         }
         
         # Execute the graph
         try:
             final_state = compiled.invoke(initial_state)
+            
+            # === [เพิ่ม] คำนวณเวลา End-to-End (ms) ===
+            t_e2e_ms = (datetime.now() - t_e2e_start).total_seconds() * 1000
+            
             return {
                 "response": final_state.get("response", "No response generated"),
                 "nodes_executed": final_state.get("nodes_executed", []),
                 "model_used": final_state.get("model_used"),
+                
+                # === [อัปเดต] ส่งออกค่า Metrics ทั้ง 5 ตัว ===
                 "t_ret_ms": final_state.get("t_ret_ms"),
                 "t_llm_ms": final_state.get("t_llm_ms"),
                 "t_ttft_ms": final_state.get("t_ttft_ms"),
-                # Expose rag debug info to help troubleshooting RAG connectivity
+                "t_tts_ms": final_state.get("t_tts_ms"),
+                "t_e2e_ms": t_e2e_ms,
+                
                 "rag_debug": final_state.get("rag_debug", {}),
             }
         except Exception as e:

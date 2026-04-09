@@ -151,6 +151,12 @@ class ChatResponse(BaseModel):
     processing_time_ms: float
     nodes_executed: List[str] = Field(default_factory=list)
 
+    t_ret_ms: Optional[float] = None
+    t_llm_ms: Optional[float] = None
+    t_ttft_ms: Optional[float] = None
+    t_tts_ms: Optional[float] = None
+    t_e2e_ms: Optional[float] = None
+
 
 class HealthResponse(BaseModel):
     status: str
@@ -228,6 +234,12 @@ async def chat(request: ChatRequest):
             model_used=result.get("model_used"),
             processing_time_ms=processing_time,
             nodes_executed=result.get("nodes_executed", []),
+
+            t_ret_ms=result.get("t_ret_ms"),
+            t_llm_ms=result.get("t_llm_ms"),
+            t_ttft_ms=result.get("t_ttft_ms"),
+            t_tts_ms=result.get("t_tts_ms"),
+            t_e2e_ms=result.get("t_e2e_ms"),
         )
     
     except Exception as e:
@@ -397,6 +409,12 @@ class TalkResponse(BaseModel):
     nodes_executed: List[str] = Field(default_factory=list)
     audio_url: Optional[str] = None  # Relative URL to fetch audio separately
 
+    t_ret_ms: Optional[float] = None
+    t_llm_ms: Optional[float] = None
+    t_ttft_ms: Optional[float] = None
+    t_tts_ms: Optional[float] = None
+    t_e2e_ms: Optional[float] = None
+
 
 class VoiceReferenceCache(BaseModel):
     """Cached voice reference info."""
@@ -466,6 +484,12 @@ async def talk(request: TalkRequest):
         "model_used": result.get("model_used") or "",
         "processing_time_ms": round(processing_time, 2),
         "nodes_executed": result.get("nodes_executed", []),
+
+        "t_ret_ms": result.get("t_ret_ms"),
+        "t_llm_ms": result.get("t_llm_ms"),
+        "t_ttft_ms": result.get("t_ttft_ms"),
+        "t_tts_ms": result.get("t_tts_ms"),
+        "t_e2e_ms": result.get("t_e2e_ms"),
         # tts_provider tells the frontend which pipeline to use for audio synthesis
         "tts_provider": request.tts_provider,
         "tts_settings": {
