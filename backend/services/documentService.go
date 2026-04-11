@@ -65,13 +65,22 @@ func triggerEmbedding(userID, projectID, documentsPath string) (map[string]inter
 	}
 	jsonBody, _ := json.Marshal(reqBody)
 
-	// Make request to AI service
+	// Make authenticated request to AI service
 	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Post(
+	req, err := http.NewRequest(
+		http.MethodPost,
 		aiServiceURL+"/embed-documents",
-		"application/json",
 		bytes.NewBuffer(jsonBody),
 	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create embedding request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if apiKey := os.Getenv("MANJU_API_KEY"); apiKey != "" {
+		req.Header.Set("X-API-Key", apiKey)
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("AI service unreachable at %s: %w", aiServiceURL, err)
 	}

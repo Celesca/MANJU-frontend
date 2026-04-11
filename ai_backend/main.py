@@ -1044,7 +1044,7 @@ async def delete_index(request: DeleteIndexRequest):
 if __name__ == "__main__":
     import uvicorn
     
-    port = int(os.getenv("AI_SERVICE_PORT", "9000"))
+    port = int(os.getenv("AI_SERVICE_PORT", "8000"))
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
