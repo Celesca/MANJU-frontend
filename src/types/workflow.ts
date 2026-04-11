@@ -63,6 +63,7 @@ export interface VoiceInputData {
   language: string;
   sampleRate: number;
   vadEnabled: boolean;
+  asrProvider: 'web-speech' | 'typhoon';
 }
 
 export interface VoiceOutputData {

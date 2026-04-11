@@ -71,6 +71,7 @@ interface WorkflowType {
   has_sheets: boolean;
   has_condition: boolean;
   tts_provider?: 'openai' | 'qwen3';
+  asr_provider?: 'web-speech' | 'typhoon';
   openai_voice?: string; // e.g. "alloy", "nova" — from voice-output node
   openai_model?: string; // e.g. "tts-1", "gpt-4o-audio-preview"
 }
@@ -186,13 +187,48 @@ export default function DemoPage() {
     }
   }, [loading]);
 
+  // Typhoon ASR: send audio blob to backend for transcription
+  const transcribeWithTyphoon = useCallback(async (audioBlob: Blob): Promise<string> => {
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'recording.wav');
+
+    const asrStart = Date.now();
+    const res = await apiFetch(`${API_BASE}/api/asr/transcribe`, {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Typhoon ASR transcription failed');
+    }
+
+    const data = await res.json();
+    const asrMs = Date.now() - asrStart;
+    console.log(`Typhoon ASR took ${asrMs}ms — "${data.text}"`);
+    return data.text || '';
+  }, [projectId]);
+
   // Voice recording functions
-  const handleVoiceInput = useCallback(async (_audioBlob: Blob) => {
-    // avoid unused param lint
-    void _audioBlob;
-    // For demo, we'll use a placeholder transcription
-    // In production, this would call a speech-to-text API
-    const mockTranscription = "[Voice message received]";
+  const handleVoiceInput = useCallback(async (audioBlob: Blob) => {
+    let transcription: string;
+
+    // Use Typhoon ASR if configured, otherwise fallback
+    if (workflowType?.asr_provider === 'typhoon') {
+      try {
+        transcription = await transcribeWithTyphoon(audioBlob);
+        if (!transcription.trim()) {
+          setError('No speech detected. Please try again.');
+          return;
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Typhoon ASR failed');
+        return;
+      }
+    } else {
+      transcription = "[Voice message received]";
+    }
 
     // Create user message
     const userMessage: Message = {
@@ -450,8 +486,10 @@ export default function DemoPage() {
 
 
   const startRecording = useCallback(async () => {
-    // If Web Speech API is available, use it for real-time recognition
-    if (recognitionRef.current) {
+    const useTyphoon = workflowType?.asr_provider === 'typhoon';
+
+    // If Web Speech API is available AND we're not using Typhoon, use it for real-time recognition
+    if (!useTyphoon && recognitionRef.current) {
       try {
         recognitionRef.current._shouldRestart = true;
         recognitionRef.current.start();
@@ -1156,6 +1194,12 @@ export default function DemoPage() {
                           ))}
                         </div>
                       )}
+                      {workflowType?.input_type === 'voice' && (
+                        <div className="text-gray-600">
+                          <span className="font-medium">ASR provider:</span>{' '}
+                          {workflowType.asr_provider === 'typhoon' ? 'Typhoon ASR' : 'Web Speech API'}
+                        </div>
+                      )}
                       {workflowType?.output_type === 'voice' && (
                         <div className="text-gray-600">
                           <span className="font-medium">TTS provider:</span>{' '}
@@ -1237,7 +1281,9 @@ export default function DemoPage() {
                 ? 'bg-blue-100 text-blue-700'
                 : 'bg-gray-100 text-gray-600'
                 }`}>
-                {workflowType.input_type === 'voice' ? '🎤 Voice Input' : '⌨️ Text Input'}
+                {workflowType.input_type === 'voice'
+                  ? `🎤 Voice Input (${workflowType.asr_provider === 'typhoon' ? 'Typhoon' : 'Web Speech'})`
+                  : '⌨️ Text Input'}
               </span>
               <span className="text-gray-400">→</span>
               <span className={`px-2 py-0.5 text-xs rounded-full ${workflowType.output_type === 'voice'

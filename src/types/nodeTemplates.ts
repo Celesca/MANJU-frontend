@@ -11,6 +11,7 @@ export const nodeTemplates: NodeTemplate[] = [
       language: 'en-US',
       sampleRate: 16000,
       vadEnabled: true,
+      asrProvider: 'web-speech',
     },
     defaultInputs: [],
     defaultOutputs: [{ id: 'audio-out', type: 'output', position: 'right', label: 'Output' }],

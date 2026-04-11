@@ -167,6 +167,7 @@ class WorkflowTypeResponse(BaseModel):
     has_sheets: bool
     has_condition: bool
     tts_provider: str = "openai"  # "openai" or "qwen3"
+    asr_provider: str = "web-speech"  # "web-speech" or "typhoon"
 
 
 class TTSRequest(BaseModel):
@@ -301,6 +302,59 @@ async def text_to_speech(request: TTSRequest):
     except Exception as e:
         logger.exception("Error in TTS generation")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# ASR — Typhoon ASR via OpenAI-compatible API
+# =============================================================================
+
+@app.post("/asr/transcribe")
+async def asr_transcribe(file: UploadFile = File(...)):
+    """
+    Transcribe an audio file using Typhoon ASR API.
+    Requires TYPHOON_API_KEY in the environment.
+    """
+    typhoon_key = os.getenv("TYPHOON_API_KEY")
+    if not typhoon_key:
+        raise HTTPException(status_code=500, detail="TYPHOON_API_KEY not configured on server")
+
+    try:
+        # Save uploaded file to a temp path (OpenAI client needs a file-like object)
+        suffix = "." + (file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else "wav")
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        try:
+            content = await file.read()
+            tmp.write(content)
+            tmp.flush()
+            tmp.close()
+
+            # Call Typhoon ASR via OpenAI-compatible endpoint
+            typhoon_client = OpenAI(
+                api_key=typhoon_key,
+                base_url="https://api.opentyphoon.ai/v1",
+            )
+
+            with open(tmp.name, "rb") as audio_file:
+                transcription = typhoon_client.audio.transcriptions.create(
+                    file=audio_file,
+                    model="typhoon-asr-realtime",
+                )
+
+            return {
+                "text": transcription.text,
+            }
+        finally:
+            # Clean up temp file
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Typhoon ASR transcription failed")
+        raise HTTPException(status_code=500, detail=f"ASR transcription failed: {str(e)}")
 
 
 # =============================================================================

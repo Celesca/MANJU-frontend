@@ -93,6 +93,18 @@ def detect_workflow_type(nodes: List) -> Dict[str, Any]:
                     tts_provider = provider
             break
 
+    # Detect ASR provider from voice-input node data
+    asr_provider = "web-speech"
+    for n in nodes:
+        ntype = n.type if hasattr(n, 'type') else n.get('type', '')
+        if ntype == "voice-input":
+            ndata = n.data if hasattr(n, 'data') else n.get('data', {})
+            if isinstance(ndata, dict):
+                provider = ndata.get('asrProvider', 'web-speech')
+                if provider:
+                    asr_provider = provider
+            break
+
     return {
         "input_type": input_type,
         "output_type": output_type,
@@ -101,6 +113,7 @@ def detect_workflow_type(nodes: List) -> Dict[str, Any]:
         "has_sheets": "google-sheets" in node_types,
         "has_condition": "if-condition" in node_types,
         "tts_provider": tts_provider,
+        "asr_provider": asr_provider,
     }
 
 
