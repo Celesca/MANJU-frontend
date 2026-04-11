@@ -587,7 +587,7 @@ export default function DemoPage() {
       // Cache the blob and record timing so download + verbose work
       if (messageId) {
         const cacheKey = `openai-tts-${messageId}`;
-        await setCachedAudio(cacheKey, blob).catch(() => {});
+        await setCachedAudio(cacheKey, blob).catch(() => { });
         setMessages(prev => prev.map(m => m.id === messageId ? { ...m, audioCacheKey: cacheKey, tts_time_ms } : m));
       }
 
@@ -771,7 +771,7 @@ export default function DemoPage() {
 
     // Store in cache for next time
     if (message.audioCacheKey) {
-      await setCachedAudio(message.audioCacheKey, blob).catch(() => {});
+      await setCachedAudio(message.audioCacheKey, blob).catch(() => { });
     }
     await playBlobAsync(blob);
   };
@@ -997,9 +997,8 @@ export default function DemoPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setVerbose(v => !v)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                verbose ? 'bg-green-100 text-green-700' : 'text-gray-500 hover:bg-gray-100'
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${verbose ? 'bg-green-100 text-green-700' : 'text-gray-500 hover:bg-gray-100'
+                }`}
               title="Toggle verbose execution info"
             >
               <Activity className="w-4 h-4" />
@@ -1159,10 +1158,16 @@ export default function DemoPage() {
                           <span className="font-medium">Model:</span> {message.model_used}
                         </div>
                       )}
-                      {message.processing_time_ms !== undefined && (
+                      {/* Total time = t_llm_ms + t_tts_ms */}
+                      {(message.llm_time_ms !== undefined || message.tts_time_ms !== undefined) && (
                         <div className="text-gray-600">
                           <span className="font-medium">Total time:</span>{' '}
-                          <span className="text-green-700 font-semibold">{message.processing_time_ms.toFixed(0)} ms</span>
+                          <span className="text-green-700 font-semibold">
+                            {((message.llm_time_ms || 0) + (message.tts_time_ms || 0)).toFixed(1)} ms
+                            <span className="text-xs text-gray-400 ml-1">
+                              ({message.llm_time_ms?.toFixed(1) || '0.0'} + {message.tts_time_ms?.toFixed(1) || '0.0'})
+                            </span>
+                          </span>
                         </div>
                       )}
                       {message.asr_time_ms !== undefined && (
