@@ -610,6 +610,7 @@ type WorkflowTypeResponse struct {
 	TTSProvider  string `json:"tts_provider,omitempty"`   // "openai" | "qwen3"
 	OpenAIVoice  string `json:"openai_voice,omitempty"`   // e.g. "alloy"
 	OpenAIModel  string `json:"openai_model,omitempty"`   // e.g. "tts-1", "gpt-4o-audio-preview"
+	ASRProvider  string `json:"asr_provider,omitempty"`   // "web-speech" | "typhoon"
 }
 
 // GetWorkflowType detects the workflow input/output modalities
@@ -714,6 +715,19 @@ func GetWorkflowType(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 			}
 		}
 
+		// Detect ASR provider from voice-input node data
+		asrProvider := "web-speech"
+		for _, node := range nodes {
+			if t, ok := node["type"].(string); ok && t == "voice-input" {
+				if data, ok := node["data"].(map[string]interface{}); ok {
+					if provider, ok := data["asrProvider"].(string); ok && provider != "" {
+						asrProvider = provider
+					}
+				}
+				break
+			}
+		}
+
 		return c.JSON(WorkflowTypeResponse{
 			InputType:    inputType,
 			OutputType:   outputType,
@@ -724,6 +738,7 @@ func GetWorkflowType(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 			TTSProvider:  ttsProvider,
 			OpenAIVoice:  openaiVoice,
 			OpenAIModel:  openaiModel,
+			ASRProvider:  asrProvider,
 		})
 	}
 	defer resp.Body.Close()
@@ -759,6 +774,23 @@ func GetWorkflowType(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		}
 		if workflowTypeResponse.OpenAIModel == "" {
 			workflowTypeResponse.OpenAIModel = "tts-1"
+		}
+	}
+
+	// Enrich ASR provider from voice-input node data
+	if workflowTypeResponse.ASRProvider == "" {
+		for _, node := range nodes {
+			if t, ok := node["type"].(string); ok && t == "voice-input" {
+				if data, ok := node["data"].(map[string]interface{}); ok {
+					if provider, ok := data["asrProvider"].(string); ok && provider != "" {
+						workflowTypeResponse.ASRProvider = provider
+					}
+				}
+				break
+			}
+		}
+		if workflowTypeResponse.ASRProvider == "" {
+			workflowTypeResponse.ASRProvider = "web-speech"
 		}
 	}
 

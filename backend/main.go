@@ -100,6 +100,7 @@ func main() {
 	routes.VoiceRoutes(api)
 	routes.ProjectRoutes(api)
 	routes.QwenTTSRoutes(api)
+	routes.ASRRoutes(api)
 
 	log.Fatal(app.Listen(":8080"))
 }
