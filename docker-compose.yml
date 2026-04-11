@@ -33,12 +33,25 @@ services:
       - DB_USER=postgres
       - DB_PASSWORD=postgres
       - DB_NAME=manju_dev
-      - AI_SERVICE_URL=${AI_SERVICE_URL:-http://host.docker.internal:8000}
+      - AI_SERVICE_URL=${AI_SERVICE_URL:-http://ai_backend:8000}
     env_file:
       - ./backend/.env
     depends_on:
       db:
         condition: service_healthy
+      ai_backend:
+        condition: service_started
+
+  ai_backend:
+    build:
+      context: ./ai_backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    working_dir: /app
+    volumes:
+      - ./ai_backend:/app
+    command: python main.py
 
   frontend:
     image: node:20-alpine
