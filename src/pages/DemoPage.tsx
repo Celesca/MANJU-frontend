@@ -216,6 +216,10 @@ export default function DemoPage() {
   // Keep only finalized Web Speech chunks to avoid relying on async state timing.
   const webSpeechFinalRef = useRef('');
   const interimTranscriptRef = useRef('');
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const isRecordingRef = useRef(false);
+  const isRecognizingRef = useRef(false);
+  const vadCutoffRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ttsCancelledRef = useRef(false);
   const sendMessageRef = useRef<(() => Promise<void>) | null>(null);
@@ -227,6 +231,18 @@ export default function DemoPage() {
   useEffect(() => {
     interimTranscriptRef.current = interimTranscript;
   }, [interimTranscript]);
+
+  useEffect(() => {
+    mediaRecorderRef.current = mediaRecorder;
+  }, [mediaRecorder]);
+
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
+
+  useEffect(() => {
+    isRecognizingRef.current = isRecognizing;
+  }, [isRecognizing]);
 
   // Load project and validate on mount
   useEffect(() => {
@@ -349,7 +365,7 @@ export default function DemoPage() {
   }, [projectId]);
 
   // Voice recording functions
-  const handleVoiceInput = useCallback(async (audioBlob: Blob) => {
+  const handleVoiceInput = useCallback(async (audioBlob: Blob, sendImmediately = true) => {
     if (!audioBlob || audioBlob.size < 512) {
       setError('Audio capture is too short or empty. Please hold the mic longer and try again.');
       return;
@@ -377,6 +393,12 @@ export default function DemoPage() {
     // Use transcription if available, otherwise use inputValue from Web Speech/manual
     const finalText = transcription.trim() || inputValue.trim();
     if (!finalText) return;
+
+    if (!sendImmediately) {
+      setInputValue(finalText);
+      setError(null);
+      return;
+    }
 
     // Create user message
     const userMessage: Message = {
@@ -485,7 +507,7 @@ export default function DemoPage() {
     } finally {
       setSending(false);
     }
-  }, [messages, projectId, workflowType]);
+  }, [messages, projectId, workflowType, inputValue]);
 
   // VAD helpers
   const startVADMonitoring = useCallback(async (stream?: MediaStream) => {
@@ -527,17 +549,58 @@ export default function DemoPage() {
             // start silence timer to finalize
             if (!vadSilenceTimerRef.current) {
               vadSilenceTimerRef.current = window.setTimeout(() => {
-                // silence detected after speech -> auto send
-                // append interim transcript then send
-                if (interimTranscript.trim()) {
-                  setInputValue(prev => (prev ? prev + ' ' + interimTranscript : interimTranscript));
+                // Silence cutoff: commit transcript to input and stop mic.
+                const committed = [
+                  inputValueRef.current,
+                  webSpeechFinalRef.current,
+                  interimTranscriptRef.current,
+                ].filter(Boolean).join(' ').trim().replace(/\s+/g, ' ');
+
+                if (committed) {
+                  setInputValue(committed);
                   setInterimTranscript('');
+                  webSpeechFinalRef.current = committed;
                 }
-                // only send if there's something to send
-                if (inputRef.current && inputRef.current.value.trim()) {
-                  sendMessage();
-                } else if (inputValue.trim()) {
-                  sendMessage();
+
+                // Stop Web Speech mic path
+                if (isRecognizingRef.current && recognitionRef.current) {
+                  try {
+                    vadCutoffRef.current = true;
+                    recognitionRef.current._shouldRestart = false;
+                    recognitionRef.current.stop();
+                  } catch (err) {
+                    console.warn('SpeechRecognition stop on VAD failed', err);
+                  }
+                  setIsRecognizing(false);
+                }
+
+                // Stop Typhoon recording path; onstop will transcribe.
+                if (isRecordingRef.current && mediaRecorderRef.current) {
+                  try { mediaRecorderRef.current.requestData(); } catch (err) { console.warn('requestData failed', err); }
+                  vadCutoffRef.current = true;
+                  try { mediaRecorderRef.current.stop(); } catch (err) { console.warn('MediaRecorder stop on VAD failed', err); }
+                  setIsRecording(false);
+                }
+
+                if (vadRafRef.current) {
+                  window.cancelAnimationFrame(vadRafRef.current);
+                  vadRafRef.current = null;
+                }
+                if (vadSilenceTimerRef.current) {
+                  window.clearTimeout(vadSilenceTimerRef.current);
+                  vadSilenceTimerRef.current = null;
+                }
+                if (vadAnalyserRef.current) {
+                  try { vadAnalyserRef.current.disconnect(); } catch (e) { console.warn(e); }
+                  vadAnalyserRef.current = null;
+                }
+                if (audioContextRef.current) {
+                  try { audioContextRef.current.close(); } catch (e) { console.warn(e); }
+                  audioContextRef.current = null;
+                }
+                if (vadMediaStreamRef.current) {
+                  try { vadMediaStreamRef.current.getTracks().forEach(t => t.stop()); } catch (e) { console.warn(e); }
+                  vadMediaStreamRef.current = null;
                 }
                 vadSpeakingRef.current = false;
                 vadSilenceTimerRef.current = null;
@@ -554,7 +617,7 @@ export default function DemoPage() {
       console.warn('VAD start failed', err);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inputValue, interimTranscript, VAD_SILENCE_MS, VAD_THRESHOLD]);
+  }, [VAD_SILENCE_MS, VAD_THRESHOLD]);
 
   const stopVADMonitoring = useCallback(() => {
     if (vadRafRef.current) {
@@ -652,7 +715,7 @@ export default function DemoPage() {
             webSpeechFinalRef.current.trim() ||
             inputValueRef.current.trim() ||
             interimTranscriptRef.current.trim();
-          if (finalText) {
+          if (finalText && !vadCutoffRef.current) {
             console.log('Web Speech ended with text:', finalText);
             setInputValue(finalText);
             setTimeout(() => {
@@ -661,6 +724,7 @@ export default function DemoPage() {
               }
             }, 120);
           }
+          vadCutoffRef.current = false;
           webSpeechFinalRef.current = '';
         }
       };
@@ -701,7 +765,9 @@ export default function DemoPage() {
           const chosenType = recorder.mimeType || 'audio/webm';
           const audioBlob = new Blob(chunks, { type: chosenType });
           console.log('Typhoon recorded chunks:', chunks.length, 'blob size:', audioBlob.size, 'type:', chosenType);
-          await handleVoiceInput(audioBlob);
+          const sendImmediately = !vadCutoffRef.current;
+          vadCutoffRef.current = false;
+          await handleVoiceInput(audioBlob, sendImmediately);
           stream.getTracks().forEach(track => track.stop());
         };
 

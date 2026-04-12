@@ -47,7 +47,7 @@ func TranscribeASR(c *fiber.Ctx) error {
 
 	// Forward to AI service
 	aiServiceURL := getAIServiceURL() + "/asr/transcribe"
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 180 * time.Second}
 
 	req, err := http.NewRequest("POST", aiServiceURL, &buf)
 	if err != nil {

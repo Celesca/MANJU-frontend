@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from workflow_executor import WorkflowExecutor, DocumentEmbeddingService
+from typhoon_asr import LocalTyphoonASR
 
 # Load environment variables
 load_dotenv()
@@ -37,6 +38,7 @@ executor: Optional[WorkflowExecutor] = None
 embedding_service: Optional[DocumentEmbeddingService] = None
 openai_client: Optional[OpenAI] = None
 http_client: Optional[httpx.AsyncClient] = None
+local_typhoon_asr: Optional[LocalTyphoonASR] = None
 
 # Qwen TTS service URL
 QWEN_TTS_URL = os.getenv("QWEN_TTS_URL", "http://localhost:8001")
@@ -45,7 +47,7 @@ QWEN_TTS_URL = os.getenv("QWEN_TTS_URL", "http://localhost:8001")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown events."""
-    global executor, embedding_service, openai_client, http_client
+    global executor, embedding_service, openai_client, http_client, local_typhoon_asr
     logger.info("Starting AI Workflow Service...")
     executor = WorkflowExecutor()
     embedding_service = DocumentEmbeddingService()
@@ -66,6 +68,18 @@ async def lifespan(app: FastAPI):
             logger.warning("Qwen3-TTS service returned status %s", resp.status_code)
     except Exception:
         logger.warning("Qwen3-TTS service not reachable at %s — /talk endpoints will fail", QWEN_TTS_URL)
+
+    # Initialize local Typhoon ASR model at startup to avoid first-request cold start.
+    use_local_asr = os.getenv("USE_LOCAL_TYPHOON_ASR", "true").lower() in ("1", "true", "yes")
+    if use_local_asr:
+        try:
+            local_typhoon_asr = LocalTyphoonASR(device=os.getenv("TYPHOON_ASR_DEVICE", "cpu"))
+            local_typhoon_asr.initialize()
+        except Exception:
+            local_typhoon_asr = None
+            logger.exception("Failed to initialize local Typhoon ASR model")
+    else:
+        logger.info("USE_LOCAL_TYPHOON_ASR disabled; /asr/transcribe will return empty text")
         
     yield
     logger.info("Shutting down AI Workflow Service...")
@@ -327,10 +341,9 @@ async def asr_transcribe(file: UploadFile = File(...)):
     Requires TYPHOON_API_KEY in the environment.
     Returns empty text if Typhoon API fails (will trigger Web Speech fallback on frontend).
     """
-    typhoon_key = os.getenv("TYPHOON_API_KEY")
-    if not typhoon_key:
-        logger.warning("TYPHOON_API_KEY not configured, returning empty transcription")
-        return {"text": ""}  # Return empty instead of error to allow Web Speech fallback
+    if not local_typhoon_asr:
+        logger.warning("Local Typhoon ASR model is not initialized, returning empty transcription")
+        return {"text": ""}
 
     try:
         # Save uploaded file to a temp path (OpenAI client needs a file-like object)
@@ -342,20 +355,7 @@ async def asr_transcribe(file: UploadFile = File(...)):
             tmp.flush()
             tmp.close()
 
-            # Call Typhoon ASR via OpenAI-compatible endpoint
-            typhoon_client = OpenAI(
-                api_key=typhoon_key,
-                base_url="https://api.opentyphoon.ai/v1",
-            )
-
-            with open(tmp.name, "rb") as audio_file:
-                transcription = typhoon_client.audio.transcriptions.create(
-                    file=audio_file,
-                    model="typhoon-asr-realtime",
-                    language="th",  # Typhoon optimized for Thai
-                )
-
-            result_text = transcription.text if transcription and hasattr(transcription, 'text') else ""
+            result_text = local_typhoon_asr.transcribe_file(tmp.name)
             logger.info(f"Typhoon ASR result: {result_text[:100]}")
             return {"text": result_text}
         finally:
