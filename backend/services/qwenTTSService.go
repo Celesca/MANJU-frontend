@@ -248,16 +248,16 @@ func Talk(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		cacheKey := MakeCacheKey(direct.Response, body.TTSProvider, body.OpenAIVoice, body.OpenAIModel)
 		log.Printf("[MANJU_TIMING] /talk direct project=%s ms=%.1f model=%s", c.Params("id"), ms, direct.ModelUsed)
 		return c.JSON(fiber.Map{
-			"text_response":     direct.Response,
-			"sentences":         sentences,
-			"cache_key":         cacheKey,
-			"model_used":        direct.ModelUsed,
+			"text_response":      direct.Response,
+			"sentences":          sentences,
+			"cache_key":          cacheKey,
+			"model_used":         direct.ModelUsed,
 			"processing_time_ms": ms,
-			"t_llm_ms":          ms,
-			"t_ttft_ms":         ms,
-			"t_e2e_ms":          ms,
-			"nodes_executed":    direct.Nodes,
-			"tts_provider":      body.TTSProvider,
+			"t_llm_ms":           ms,
+			"t_ttft_ms":          ms,
+			"t_e2e_ms":           ms,
+			"nodes_executed":     direct.Nodes,
+			"tts_provider":       body.TTSProvider,
 			"tts_settings": fiber.Map{
 				"tts_mode":           body.TTSMode,
 				"voice_name":         body.VoiceName,

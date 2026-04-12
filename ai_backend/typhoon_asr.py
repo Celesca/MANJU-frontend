@@ -2,7 +2,7 @@ import logging
 import os
 import tempfile
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,64 @@ class LocalTyphoonASR:
         sf.write(tmp_path, y, self.target_sr)
         return tmp_path
 
+    def _decode_token_ids(self, ids: Any) -> str:
+        if self.model is None or ids is None:
+            return ""
+
+        try:
+            if hasattr(ids, "tolist"):
+                ids = ids.tolist()
+            if isinstance(ids, tuple):
+                ids = list(ids)
+            if not isinstance(ids, list):
+                return ""
+            ids = [int(i) for i in ids]
+        except Exception:
+            return ""
+
+        # NeMo ASR models commonly expose tokenizer.ids_to_text(ids).
+        try:
+            tokenizer = getattr(self.model, "tokenizer", None)
+            if tokenizer and hasattr(tokenizer, "ids_to_text"):
+                text = tokenizer.ids_to_text(ids)
+                return (text or "").strip()
+        except Exception:
+            pass
+
+        return ""
+
+    def _extract_text(self, value: Any) -> str:
+        if value is None:
+            return ""
+
+        if isinstance(value, str):
+            return value.strip()
+
+        if isinstance(value, dict):
+            for key in ("text", "pred_text", "transcript"):
+                text = self._extract_text(value.get(key))
+                if text:
+                    return text
+
+        for attr in ("text", "pred_text", "transcript"):
+            if hasattr(value, attr):
+                text = self._extract_text(getattr(value, attr, None))
+                if text:
+                    return text
+
+        if hasattr(value, "y_sequence"):
+            text = self._decode_token_ids(getattr(value, "y_sequence", None))
+            if text:
+                return text
+
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                text = self._extract_text(item)
+                if text:
+                    return text
+
+        return ""
+
     def transcribe_file(self, input_path: str) -> str:
         if self.model is None:
             self.initialize()
@@ -72,8 +130,10 @@ class LocalTyphoonASR:
         try:
             processed_path = self._prepare_audio(input_path)
             try:
-                result = self.model.transcribe(audio=[processed_path], batch_size=1)
+                result = self.model.transcribe(audio=[processed_path], batch_size=1, return_hypotheses=False)
             except TypeError:
+                result = self.model.transcribe(audio=[processed_path], batch_size=1)
+            except Exception:
                 result = self.model.transcribe(audio=[processed_path])
 
             if not result:
@@ -81,38 +141,20 @@ class LocalTyphoonASR:
 
             first = result[0]
             logger.info("Typhoon ASR raw output type: %s", type(first).__name__)
-
-            if hasattr(first, "text"):
-                text = (first.text or "").strip()
-                if text:
-                    return text
-
-            if isinstance(first, str):
-                text = first.strip()
-                if text:
-                    return text
-
-            if isinstance(first, dict):
-                text = str(first.get("text", "")).strip()
-                if text:
-                    return text
-
-            if hasattr(first, "__dict__"):
-                text = str(getattr(first, "text", "")).strip()
-                if text:
-                    return text
+            text = self._extract_text(result)
+            if text:
+                return text
 
             # Fallback: ask NeMo for hypotheses output and extract text.
             try:
                 hyps = self.model.transcribe(audio=[processed_path], batch_size=1, return_hypotheses=True)
-                if hyps:
-                    h = hyps[0]
-                    if hasattr(h, "text"):
-                        return (h.text or "").strip()
-                    return str(h).strip()
+                text = self._extract_text(hyps)
+                if text:
+                    return text
             except Exception:
                 pass
 
+            logger.warning("Typhoon ASR produced output but no decodable text was found")
             return ""
         finally:
             if processed_path and os.path.exists(processed_path):
