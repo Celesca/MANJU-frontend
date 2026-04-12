@@ -72,9 +72,107 @@ interface WorkflowType {
   has_condition: boolean;
   tts_provider?: 'openai' | 'qwen3';
   asr_provider?: 'web-speech' | 'typhoon';
+  asr_language?: string; // e.g. "th", "th-TH", "en", "en-US"
   openai_voice?: string; // e.g. "alloy", "nova" — from voice-output node
   openai_model?: string; // e.g. "tts-1", "gpt-4o-audio-preview"
 }
+
+const resolveSpeechLang = (asrLanguage?: string): string => {
+  const raw = (asrLanguage || '').trim().toLowerCase();
+  if (!raw) return 'th-TH';
+  if (raw === 'th') return 'th-TH';
+  if (raw === 'en') return 'en-US';
+  if (raw === 'ja') return 'ja-JP';
+  if (raw === 'zh') return 'zh-CN';
+  return asrLanguage || 'th-TH';
+};
+
+const downmixAndResample = (buffer: AudioBuffer, targetSampleRate: number): Float32Array => {
+  const channels = buffer.numberOfChannels;
+  const inputLength = buffer.length;
+  const sourceRate = buffer.sampleRate;
+
+  const mono = new Float32Array(inputLength);
+  for (let ch = 0; ch < channels; ch++) {
+    const data = buffer.getChannelData(ch);
+    for (let i = 0; i < inputLength; i++) {
+      mono[i] += data[i] / channels;
+    }
+  }
+
+  if (sourceRate === targetSampleRate) {
+    return mono;
+  }
+
+  const ratio = sourceRate / targetSampleRate;
+  const outputLength = Math.max(1, Math.floor(inputLength / ratio));
+  const output = new Float32Array(outputLength);
+
+  for (let i = 0; i < outputLength; i++) {
+    const srcIndex = i * ratio;
+    const i0 = Math.floor(srcIndex);
+    const i1 = Math.min(i0 + 1, inputLength - 1);
+    const frac = srcIndex - i0;
+    output[i] = mono[i0] * (1 - frac) + mono[i1] * frac;
+  }
+
+  return output;
+};
+
+const encodeWav16BitMono = (samples: Float32Array, sampleRate: number): Blob => {
+  const bytesPerSample = 2;
+  const blockAlign = bytesPerSample;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = samples.length * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  const writeString = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    offset += 2;
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' });
+};
+
+const convertBlobToWav = async (blob: Blob): Promise<Blob> => {
+  const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+  if (!AudioCtx) {
+    throw new Error('AudioContext not available for WAV conversion');
+  }
+
+  const ctx = new AudioCtx();
+  try {
+    const arrayBuffer = await blob.arrayBuffer();
+    const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
+    const mono16k = downmixAndResample(audioBuffer, 16000);
+    return encodeWav16BitMono(mono16k, 16000);
+  } finally {
+    try { await ctx.close(); } catch (err) { console.warn(err); }
+  }
+};
 
 export default function DemoPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -202,10 +300,29 @@ export default function DemoPage() {
 
   // Typhoon ASR: send audio blob to backend for transcription
   const transcribeWithTyphoon = useCallback(async (audioBlob: Blob): Promise<string | null> => {
-    const ext = audioBlob.type.includes('webm') ? 'webm' : audioBlob.type.includes('ogg') ? 'ogg' : 'wav';
-    console.log('Sending Typhoon ASR audio:', { size: audioBlob.size, type: audioBlob.type, ext });
+    let payloadBlob = audioBlob;
+    try {
+      payloadBlob = await convertBlobToWav(audioBlob);
+    } catch (err) {
+      console.warn('WAV conversion failed, sending original blob', err);
+    }
+
+    const ext = payloadBlob.type.includes('wav') ? 'wav' : payloadBlob.type.includes('ogg') ? 'ogg' : 'wav';
+    console.log('Sending Typhoon ASR audio:', {
+      originalSize: audioBlob.size,
+      originalType: audioBlob.type,
+      payloadSize: payloadBlob.size,
+      payloadType: payloadBlob.type,
+      ext,
+    });
+
+    if (payloadBlob.size > 4.5 * 1024 * 1024) {
+      console.warn('Typhoon payload too large:', payloadBlob.size);
+      return null;
+    }
+
     const formData = new FormData();
-    formData.append('file', audioBlob, `recording.${ext}`);
+    formData.append('file', payloadBlob, `recording.${ext}`);
 
     const asrStart = Date.now();
     try {
@@ -473,8 +590,8 @@ export default function DemoPage() {
       const recog = new SpeechRecognition();
       recog.continuous = false; // Stop naturally when user stops speaking
       recog.interimResults = true; // Real-time interim results
-      // Prefer browser locale; fallback to Thai for this product's primary language.
-      recog.lang = navigator.language || 'th-TH';
+      // Always respect workflow-configured language first.
+      recog.lang = resolveSpeechLang(workflowType?.asr_language);
       recog.maxAlternatives = 1;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -553,7 +670,7 @@ export default function DemoPage() {
       console.warn('SpeechRecognition init failed', err);
       recognitionRef.current = null;
     }
-  }, [stopVADMonitoring]);
+  }, [stopVADMonitoring, workflowType?.asr_language]);
 
 
 

@@ -607,10 +607,11 @@ type WorkflowTypeResponse struct {
 	HasRAG       bool   `json:"has_rag"`
 	HasSheets    bool   `json:"has_sheets"`
 	HasCondition bool   `json:"has_condition"`
-	TTSProvider  string `json:"tts_provider,omitempty"`   // "openai" | "qwen3"
-	OpenAIVoice  string `json:"openai_voice,omitempty"`   // e.g. "alloy"
-	OpenAIModel  string `json:"openai_model,omitempty"`   // e.g. "tts-1", "gpt-4o-audio-preview"
-	ASRProvider  string `json:"asr_provider,omitempty"`   // "web-speech" | "typhoon"
+	TTSProvider  string `json:"tts_provider,omitempty"` // "openai" | "qwen3"
+	OpenAIVoice  string `json:"openai_voice,omitempty"` // e.g. "alloy"
+	OpenAIModel  string `json:"openai_model,omitempty"` // e.g. "tts-1", "gpt-4o-audio-preview"
+	ASRProvider  string `json:"asr_provider,omitempty"` // "web-speech" | "typhoon"
+	ASRLanguage  string `json:"asr_language,omitempty"` // e.g. "th", "en", "ja", "th-TH"
 }
 
 // GetWorkflowType detects the workflow input/output modalities
@@ -717,11 +718,15 @@ func GetWorkflowType(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 
 		// Detect ASR provider from voice-input node data
 		asrProvider := "web-speech"
+		asrLanguage := "th"
 		for _, node := range nodes {
 			if t, ok := node["type"].(string); ok && t == "voice-input" {
 				if data, ok := node["data"].(map[string]interface{}); ok {
 					if provider, ok := data["asrProvider"].(string); ok && provider != "" {
 						asrProvider = provider
+					}
+					if language, ok := data["language"].(string); ok && language != "" {
+						asrLanguage = language
 					}
 				}
 				break
@@ -739,6 +744,7 @@ func GetWorkflowType(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 			OpenAIVoice:  openaiVoice,
 			OpenAIModel:  openaiModel,
 			ASRProvider:  asrProvider,
+			ASRLanguage:  asrLanguage,
 		})
 	}
 	defer resp.Body.Close()
@@ -791,6 +797,22 @@ func GetWorkflowType(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 		}
 		if workflowTypeResponse.ASRProvider == "" {
 			workflowTypeResponse.ASRProvider = "web-speech"
+		}
+	}
+
+	if workflowTypeResponse.ASRLanguage == "" {
+		for _, node := range nodes {
+			if t, ok := node["type"].(string); ok && t == "voice-input" {
+				if data, ok := node["data"].(map[string]interface{}); ok {
+					if language, ok := data["language"].(string); ok && language != "" {
+						workflowTypeResponse.ASRLanguage = language
+					}
+				}
+				break
+			}
+		}
+		if workflowTypeResponse.ASRLanguage == "" {
+			workflowTypeResponse.ASRLanguage = "th"
 		}
 	}
 
