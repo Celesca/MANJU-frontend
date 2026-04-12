@@ -71,14 +71,49 @@ class LocalTyphoonASR:
         processed_path: Optional[str] = None
         try:
             processed_path = self._prepare_audio(input_path)
-            result = self.model.transcribe(audio=[processed_path])
+            try:
+                result = self.model.transcribe(audio=[processed_path], batch_size=1)
+            except TypeError:
+                result = self.model.transcribe(audio=[processed_path])
+
             if not result:
                 return ""
 
             first = result[0]
+            logger.info("Typhoon ASR raw output type: %s", type(first).__name__)
+
             if hasattr(first, "text"):
-                return (first.text or "").strip()
-            return str(first).strip()
+                text = (first.text or "").strip()
+                if text:
+                    return text
+
+            if isinstance(first, str):
+                text = first.strip()
+                if text:
+                    return text
+
+            if isinstance(first, dict):
+                text = str(first.get("text", "")).strip()
+                if text:
+                    return text
+
+            if hasattr(first, "__dict__"):
+                text = str(getattr(first, "text", "")).strip()
+                if text:
+                    return text
+
+            # Fallback: ask NeMo for hypotheses output and extract text.
+            try:
+                hyps = self.model.transcribe(audio=[processed_path], batch_size=1, return_hypotheses=True)
+                if hyps:
+                    h = hyps[0]
+                    if hasattr(h, "text"):
+                        return (h.text or "").strip()
+                    return str(h).strip()
+            except Exception:
+                pass
+
+            return ""
         finally:
             if processed_path and os.path.exists(processed_path):
                 try:

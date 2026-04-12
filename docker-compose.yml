@@ -56,6 +56,9 @@ services:
       - manju_documents_data:/app/uploads/documents
     env_file:
       - ./ai_backend/.env
+    environment:
+      - USE_LOCAL_TYPHOON_ASR=true
+      - TYPHOON_ASR_DEVICE=cpu
     command: python main.py
 
   frontend:
