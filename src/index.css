@@ -8,6 +8,16 @@
   --font-sans: "Prompt", ui-sans-serif, system-ui, sans-serif;
 }
 
+/* Global readability for text-like form controls */
+:where(
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']),
+  select,
+  textarea
+) {
+  color: #111827 !important;
+  background-color: #ffffff !important;
+}
+
 /* Improve placeholder contrast on light inputs/backgrounds */
 input::placeholder,
 textarea::placeholder,
@@ -31,6 +41,11 @@ select::placeholder {
 }
 
 .ai-model-config-panel select option {
+  background-color: #ffffff;
+  color: #111827;
+}
+
+select option {
   background-color: #ffffff;
   color: #111827;
 }

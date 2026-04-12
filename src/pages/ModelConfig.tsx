@@ -416,7 +416,7 @@ export default function ModelConfig() {
                 setWorkflowName(e.target.value);
                 setHasUnsavedChanges(true);
               }}
-              className="text-lg font-semibold bg-transparent border-none focus:outline-none focus:ring-2 focus:ring-purple-500 rounded px-2 py-1"
+              className="text-lg font-semibold text-gray-900 bg-white border-none focus:outline-none focus:ring-2 focus:ring-purple-500 rounded px-2 py-1"
             />
             <button
               onClick={() => nameInputRef.current?.focus()}
