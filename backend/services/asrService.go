@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -53,6 +54,9 @@ func TranscribeASR(c *fiber.Ctx) error {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create request"})
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if apiKey := os.Getenv("MANJU_API_KEY"); apiKey != "" {
+		req.Header.Set("X-API-Key", apiKey)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {

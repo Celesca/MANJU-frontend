@@ -114,8 +114,21 @@ export default function DemoPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const inputValueRef = useRef('');
+  // Keep only finalized Web Speech chunks to avoid relying on async state timing.
+  const webSpeechFinalRef = useRef('');
+  const interimTranscriptRef = useRef('');
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ttsCancelledRef = useRef(false);
+  const sendMessageRef = useRef<(() => Promise<void>) | null>(null);
+
+  useEffect(() => {
+    inputValueRef.current = inputValue;
+  }, [inputValue]);
+
+  useEffect(() => {
+    interimTranscriptRef.current = interimTranscript;
+  }, [interimTranscript]);
 
   // Load project and validate on mount
   useEffect(() => {
@@ -188,57 +201,76 @@ export default function DemoPage() {
   }, [loading]);
 
   // Typhoon ASR: send audio blob to backend for transcription
-  const transcribeWithTyphoon = useCallback(async (audioBlob: Blob): Promise<string> => {
+  const transcribeWithTyphoon = useCallback(async (audioBlob: Blob): Promise<string | null> => {
+    const ext = audioBlob.type.includes('webm') ? 'webm' : audioBlob.type.includes('ogg') ? 'ogg' : 'wav';
+    console.log('Sending Typhoon ASR audio:', { size: audioBlob.size, type: audioBlob.type, ext });
     const formData = new FormData();
-    formData.append('file', audioBlob, 'recording.wav');
+    formData.append('file', audioBlob, `recording.${ext}`);
 
     const asrStart = Date.now();
-    const res = await apiFetch(`${API_BASE}/api/asr/transcribe`, {
-      method: 'POST',
-      credentials: 'include',
-      body: formData,
-    });
+    try {
+      const res = await apiFetch(`${API_BASE}/api/asr/transcribe`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Typhoon ASR transcription failed');
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.warn(`Typhoon ASR failed (${res.status}): ${err.error || 'Unknown error'}`);
+        return null; // Return null to signal failure for fallback
+      }
+
+      const data = await res.json();
+      const asrMs = Date.now() - asrStart;
+      console.log(`Typhoon ASR took ${asrMs}ms — "${data.text}"`);
+      return data.text || '';
+    } catch (err) {
+      console.warn('Typhoon ASR transcription error:', err);
+      return null; // Return null to signal failure for fallback
     }
-
-    const data = await res.json();
-    const asrMs = Date.now() - asrStart;
-    console.log(`Typhoon ASR took ${asrMs}ms — "${data.text}"`);
-    return data.text || '';
   }, [projectId]);
 
   // Voice recording functions
   const handleVoiceInput = useCallback(async (audioBlob: Blob) => {
-    let transcription: string;
-
-    // Use Typhoon ASR if configured, otherwise fallback
-    if (workflowType?.asr_provider === 'typhoon') {
-      try {
-        transcription = await transcribeWithTyphoon(audioBlob);
-        if (!transcription.trim()) {
-          setError('No speech detected. Please try again.');
-          return;
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Typhoon ASR failed');
-        return;
-      }
-    } else {
-      transcription = "[Voice message received]";
+    if (!audioBlob || audioBlob.size < 512) {
+      setError('Audio capture is too short or empty. Please hold the mic longer and try again.');
+      return;
     }
+
+    let transcription: string = '';
+
+    // Try Typhoon ASR if configured, with fallback to Web Speech
+    if (workflowType?.asr_provider === 'typhoon') {
+      console.log('Attempting Typhoon ASR transcription...');
+      const result = await transcribeWithTyphoon(audioBlob);
+      if (result && result.trim()) {
+        transcription = result;
+      } else {
+        console.warn('Typhoon ASR failed or returned empty, skipping audio transcription');
+      }
+    }
+
+    // If no transcription yet, require inputValue from Web Speech or manual entry
+    if (!transcription.trim() && !inputValue.trim()) {
+      setError('No speech detected or transcription available. Please try again or use text input.');
+      return;
+    }
+
+    // Use transcription if available, otherwise use inputValue from Web Speech/manual
+    const finalText = transcription.trim() || inputValue.trim();
+    if (!finalText) return;
 
     // Create user message
     const userMessage: Message = {
       id: `msg-${Date.now()}-user`,
       role: 'user',
-      content: mockTranscription,
+      content: finalText,
       timestamp: new Date(),
     };
 
     setMessages(prev => [...prev, userMessage]);
+    setInputValue(''); // Clear input after sending
     setSending(true);
     setError(null);
 
@@ -255,7 +287,7 @@ export default function DemoPage() {
       if (isQwen3Voice) {
         // Qwen3 TTS path — workflow → sentences → pipeline playback
         const llmStart = Date.now();
-        const talkResult = await callTalkEndpoint(mockTranscription, conversationHistory);
+        const talkResult = await callTalkEndpoint(userMessage.content, conversationHistory);
         const llm_time_ms = Date.now() - llmStart;
         if (!talkResult) {
           throw new Error('Failed to get voice response from Qwen3 TTS');
@@ -293,7 +325,7 @@ export default function DemoPage() {
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
-            message: mockTranscription,
+            message: userMessage.content,
             conversation_history: conversationHistory,
             session_id: projectId,
             is_voice_input: true,
@@ -439,10 +471,11 @@ export default function DemoPage() {
 
     try {
       const recog = new SpeechRecognition();
-      recog.continuous = true;
-      recog.interimResults = true;
-      // default language (use Thai per example). You can make this configurable later.
-      recog.lang = 'th-TH';
+      recog.continuous = false; // Stop naturally when user stops speaking
+      recog.interimResults = true; // Real-time interim results
+      // Prefer browser locale; fallback to Thai for this product's primary language.
+      recog.lang = navigator.language || 'th-TH';
+      recog.maxAlternatives = 1;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       recog.onresult = (ev: any) => {
@@ -459,9 +492,33 @@ export default function DemoPage() {
 
         // Append final transcript to the input value and keep interim separately
         if (finalTranscript) {
-          setInputValue(prev => (prev ? prev + ' ' + finalTranscript : finalTranscript));
+          const nextFinal = webSpeechFinalRef.current
+            ? `${webSpeechFinalRef.current} ${finalTranscript}`.trim()
+            : finalTranscript.trim();
+          webSpeechFinalRef.current = nextFinal;
+          setInputValue(nextFinal);
         }
         setInterimTranscript(interim);
+        if (interim) {
+          console.log('Web Speech interim:', interim);
+        }
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      recog.onerror = (ev: any) => {
+        console.warn('Web Speech error:', ev?.error || ev);
+        if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
+          setError('Microphone permission denied for Web Speech. Please allow mic access in browser settings.');
+        } else if (ev?.error === 'no-speech') {
+          setError('No speech detected. Please speak closer to the microphone and try again.');
+        } else {
+          setError(`Web Speech error: ${ev?.error || 'unknown'}`);
+        }
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      recog.onnomatch = (_ev: any) => {
+        console.warn('Web Speech: no match');
       };
 
       recog.onend = () => {
@@ -473,6 +530,21 @@ export default function DemoPage() {
           setInterimTranscript('');
           // stop VAD monitoring when recognition naturally ends
           try { stopVADMonitoring(); } catch (err) { console.warn(err); }
+          // Automatically send message if we have accumulated text from Web Speech
+          const finalText =
+            webSpeechFinalRef.current.trim() ||
+            inputValueRef.current.trim() ||
+            interimTranscriptRef.current.trim();
+          if (finalText) {
+            console.log('Web Speech ended with text:', finalText);
+            setInputValue(finalText);
+            setTimeout(() => {
+              if (sendMessageRef.current) {
+                void sendMessageRef.current();
+              }
+            }, 120);
+          }
+          webSpeechFinalRef.current = '';
         }
       };
 
@@ -487,51 +559,65 @@ export default function DemoPage() {
 
   const startRecording = useCallback(async () => {
     const useTyphoon = workflowType?.asr_provider === 'typhoon';
+    setError(null);
 
-    // If Web Speech API is available AND we're not using Typhoon, use it for real-time recognition
-    if (!useTyphoon && recognitionRef.current) {
+    // Typhoon mode: always record audio and call backend ASR.
+    if (useTyphoon) {
       try {
-        recognitionRef.current._shouldRestart = true;
-        recognitionRef.current.start();
-        setIsRecognizing(true);
-        // start VAD monitoring (separate mic stream) to detect silence
-        try { await startVADMonitoring(); } catch (err) { console.warn('VAD start failed', err); }
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : MediaRecorder.isTypeSupported('audio/webm')
+            ? 'audio/webm'
+            : '';
+        const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+        try { await startVADMonitoring(stream); } catch (err) { console.warn('VAD start failed', err); }
+        const chunks: Blob[] = [];
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            chunks.push(e.data);
+          }
+        };
+
+        recorder.onstop = async () => {
+          const chosenType = recorder.mimeType || 'audio/webm';
+          const audioBlob = new Blob(chunks, { type: chosenType });
+          console.log('Typhoon recorded chunks:', chunks.length, 'blob size:', audioBlob.size, 'type:', chosenType);
+          await handleVoiceInput(audioBlob);
+          stream.getTracks().forEach(track => track.stop());
+        };
+
+        setMediaRecorder(recorder);
+        recorder.start(250);
+        setIsRecording(true);
+        console.log('Typhoon recording started (will call ai_backend on stop)');
         return;
       } catch (err) {
-        console.warn('SpeechRecognition start failed', err);
+        setError('Failed to access microphone. Please allow microphone access.');
+        console.error('Microphone error:', err);
+        return;
       }
     }
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      // start VAD monitoring based on the same stream (so we can auto-stop on silence)
-      try { await startVADMonitoring(stream); } catch (err) { console.warn('VAD start failed', err); }
-      const chunks: Blob[] = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunks.push(e.data);
-        }
-      };
-
-      recorder.onstop = async () => {
-        const audioBlob = new Blob(chunks, { type: 'audio/webm' });
-
-        // Convert to text using Web Speech API or send to backend for transcription
-        await handleVoiceInput(audioBlob);
-
-        // Stop all tracks
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      setMediaRecorder(recorder);
-      recorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      setError('Failed to access microphone. Please allow microphone access.');
-      console.error('Microphone error:', err);
+    // Web Speech mode (browser built-in, real-time)
+    if (recognitionRef.current) {
+      try {
+        webSpeechFinalRef.current = '';
+        setInputValue('');
+        setInterimTranscript('');
+        recognitionRef.current._shouldRestart = true;
+        recognitionRef.current.start();
+        setIsRecognizing(true);
+        console.log('Web Speech Recognition started');
+        return;
+      } catch (err) {
+        console.warn('SpeechRecognition start failed:', err);
+        setError('Failed to start Web Speech. Trying microphone fallback...');
+      }
     }
+
+    setError('Web Speech recognition is not supported in this browser. Use Chrome/Edge or switch ASR provider to Typhoon.');
   }, [handleVoiceInput, startVADMonitoring]);
 
   const stopRecording = useCallback(() => {
@@ -540,6 +626,7 @@ export default function DemoPage() {
       try {
         recognitionRef.current._shouldRestart = false;
         recognitionRef.current.stop();
+        console.log('Web Speech stopped, final input value:', inputValue);
       } catch (err) {
         console.warn('SpeechRecognition stop failed', err);
       }
@@ -550,11 +637,12 @@ export default function DemoPage() {
     }
 
     if (mediaRecorder && isRecording) {
+      try { mediaRecorder.requestData(); } catch (err) { console.warn('requestData failed', err); }
       mediaRecorder.stop();
       setIsRecording(false);
       try { stopVADMonitoring(); } catch (err) { console.warn(err); }
     }
-  }, [mediaRecorder, isRecording, isRecognizing, stopVADMonitoring]);
+  }, [mediaRecorder, isRecording, isRecognizing, stopVADMonitoring, inputValue]);
 
   // Text-to-speech for voice output using backend OpenAI TTS
   const speakResponse = async (text: string, messageId?: string) => {
@@ -947,6 +1035,10 @@ export default function DemoPage() {
       inputRef.current?.focus();
     }
   }, [inputValue, messages, projectId, workflowType, sending]);
+
+  useEffect(() => {
+    sendMessageRef.current = sendMessage;
+  }, [sendMessage]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

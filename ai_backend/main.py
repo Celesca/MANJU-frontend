@@ -325,10 +325,12 @@ async def asr_transcribe(file: UploadFile = File(...)):
     """
     Transcribe an audio file using Typhoon ASR API.
     Requires TYPHOON_API_KEY in the environment.
+    Returns empty text if Typhoon API fails (will trigger Web Speech fallback on frontend).
     """
     typhoon_key = os.getenv("TYPHOON_API_KEY")
     if not typhoon_key:
-        raise HTTPException(status_code=500, detail="TYPHOON_API_KEY not configured on server")
+        logger.warning("TYPHOON_API_KEY not configured, returning empty transcription")
+        return {"text": ""}  # Return empty instead of error to allow Web Speech fallback
 
     try:
         # Save uploaded file to a temp path (OpenAI client needs a file-like object)
@@ -350,11 +352,12 @@ async def asr_transcribe(file: UploadFile = File(...)):
                 transcription = typhoon_client.audio.transcriptions.create(
                     file=audio_file,
                     model="typhoon-asr-realtime",
+                    language="th",  # Typhoon optimized for Thai
                 )
 
-            return {
-                "text": transcription.text,
-            }
+            result_text = transcription.text if transcription and hasattr(transcription, 'text') else ""
+            logger.info(f"Typhoon ASR result: {result_text[:100]}")
+            return {"text": result_text}
         finally:
             # Clean up temp file
             try:
@@ -366,7 +369,8 @@ async def asr_transcribe(file: UploadFile = File(...)):
         raise
     except Exception as e:
         logger.exception("Typhoon ASR transcription failed")
-        raise HTTPException(status_code=500, detail=f"ASR transcription failed: {str(e)}")
+        # Return empty text instead of error to trigger Web Speech fallback on frontend
+        return {"text": ""}
 
 
 # =============================================================================

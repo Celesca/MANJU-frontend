@@ -54,6 +54,8 @@ services:
     volumes:
       - ./ai_backend:/app
       - manju_documents_data:/app/uploads/documents
+    env_file:
+      - ./ai_backend/.env
     command: python main.py
 
   frontend:
