@@ -61,6 +61,7 @@ export const nodeTemplates: NodeTemplate[] = [
       chunkSize: 512,
       chunkOverlap: 50,
       embeddingModel: 'text-embedding-3-small',
+      openaiApiKey: '',
     },
     defaultInputs: [],
     defaultOutputs: [{ id: 'context-out', type: 'output', position: 'right', label: 'Context' }],

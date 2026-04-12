@@ -208,6 +208,10 @@ class DocumentEmbeddingService:
         documents_path: str,
         user_id: str,
         project_id: str,
+        embedding_model: Optional[str] = None,
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
+        openai_api_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Embed documents from a directory into a FAISS index.
@@ -222,9 +226,16 @@ class DocumentEmbeddingService:
         """
         if not FAISS_AVAILABLE:
             return {"success": False, "error": "FAISS not available"}
-        
-        if not self.embeddings:
+
+        api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+        if not api_key:
             return {"success": False, "error": "OpenAI API key not configured"}
+
+        embeddings_model = embedding_model or "text-embedding-3-small"
+        embeddings = OpenAIEmbeddings(
+            model=embeddings_model,
+            openai_api_key=api_key,
+        )
         
         try:
             # Load documents
@@ -234,13 +245,13 @@ class DocumentEmbeddingService:
             
             # Split documents
             text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000,
-                chunk_overlap=200,
+                chunk_size=max(100, int(chunk_size or 1000)),
+                chunk_overlap=max(0, int(chunk_overlap or 200)),
             )
             splits = text_splitter.split_documents(documents)
             
             # Create FAISS index
-            vectorstore = FAISS.from_documents(splits, self.embeddings)
+            vectorstore = FAISS.from_documents(splits, embeddings)
             
             # Save index
             index_base = os.getenv("FAISS_INDEX_PATH", "./faiss_indexes")

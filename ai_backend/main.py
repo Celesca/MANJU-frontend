@@ -947,6 +947,10 @@ class EmbedDocumentsRequest(BaseModel):
     documents_path: str
     user_id: str
     project_id: str
+    embedding_model: Optional[str] = "text-embedding-3-small"
+    chunk_size: Optional[int] = 1000
+    chunk_overlap: Optional[int] = 200
+    openai_api_key: Optional[str] = None
 
 
 class EmbedDocumentsResponse(BaseModel):
@@ -994,6 +998,10 @@ async def embed_documents(request: EmbedDocumentsRequest):
             documents_path=request.documents_path,
             user_id=request.user_id,
             project_id=request.project_id,
+            embedding_model=request.embedding_model,
+            chunk_size=request.chunk_size,
+            chunk_overlap=request.chunk_overlap,
+            openai_api_key=request.openai_api_key,
         )
         return EmbedDocumentsResponse(**result)
     except Exception as e:

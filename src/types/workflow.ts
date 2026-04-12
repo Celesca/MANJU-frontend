@@ -43,6 +43,7 @@ export interface RAGDocumentData {
   chunkSize: number;
   chunkOverlap: number;
   embeddingModel: string;
+  openaiApiKey?: string;
 }
 
 export interface UploadedDocument {

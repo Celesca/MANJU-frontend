@@ -26,6 +26,13 @@ type DocumentInfo struct {
 	FilePath   string    `json:"filePath,omitempty"`
 }
 
+type EmbedDocumentsConfig struct {
+	EmbeddingModel string `json:"embedding_model"`
+	ChunkSize      int    `json:"chunk_size"`
+	ChunkOverlap   int    `json:"chunk_overlap"`
+	OpenAIAPIKey   string `json:"openai_api_key"`
+}
+
 // getDocumentsStoragePath returns the base path for document storage
 func getDocumentsStoragePath() string {
 	path := os.Getenv("DOCUMENTS_STORAGE_PATH")
@@ -48,7 +55,7 @@ func ensureUserDocumentDir(userID, projectID string) (string, error) {
 }
 
 // triggerEmbedding calls the AI service to embed documents and returns the response
-func triggerEmbedding(userID, projectID, documentsPath string) (map[string]interface{}, error) {
+func triggerEmbedding(userID, projectID, documentsPath string, cfg EmbedDocumentsConfig) (map[string]interface{}, error) {
 	aiServiceURL := getAIServiceURL()
 
 	// Get absolute path
@@ -62,6 +69,19 @@ func triggerEmbedding(userID, projectID, documentsPath string) (map[string]inter
 		"documents_path": absPath,
 		"user_id":        userID,
 		"project_id":     projectID,
+	}
+	if cfg.EmbeddingModel != "" {
+		reqBody["embedding_model"] = cfg.EmbeddingModel
+	}
+	if cfg.OpenAIAPIKey != "" {
+		reqBody["openai_api_key"] = cfg.OpenAIAPIKey
+	}
+
+	if cfg.ChunkSize > 0 {
+		reqBody["chunk_size"] = fmt.Sprintf("%d", cfg.ChunkSize)
+	}
+	if cfg.ChunkOverlap >= 0 {
+		reqBody["chunk_overlap"] = fmt.Sprintf("%d", cfg.ChunkOverlap)
 	}
 	jsonBody, _ := json.Marshal(reqBody)
 
@@ -145,8 +165,11 @@ func EmbedProjectDocuments(c *fiber.Ctx, repo *repository.ProjectRepository) err
 		})
 	}
 
+	var cfg EmbedDocumentsConfig
+	_ = c.BodyParser(&cfg)
+
 	// Trigger embedding
-	result, err := triggerEmbedding(userIDStr.(string), projectID, docDir)
+	result, err := triggerEmbedding(userIDStr.(string), projectID, docDir, cfg)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
