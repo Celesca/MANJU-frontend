@@ -267,6 +267,11 @@ type DemoChatResponse struct {
 	ModelUsed        string   `json:"model_used,omitempty"`
 	ProcessingTimeMs float64  `json:"processing_time_ms"`
 	NodesExecuted    []string `json:"nodes_executed"`
+	TRetMs           *float64 `json:"t_ret_ms,omitempty"`
+	TLlmMs           *float64 `json:"t_llm_ms,omitempty"`
+	TTtftMs          *float64 `json:"t_ttft_ms,omitempty"`
+	TTtsMs           *float64 `json:"t_tts_ms,omitempty"`
+	TE2eMs           *float64 `json:"t_e2e_ms,omitempty"`
 }
 
 // DemoRequest is the request body from the frontend

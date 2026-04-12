@@ -22,8 +22,11 @@ interface Message {
   model_used?: string;
   processing_time_ms?: number;
   asr_time_ms?: number;
+  t_ret_ms?: number;
   llm_time_ms?: number;
+  t_ttft_ms?: number;
   tts_time_ms?: number;
+  t_e2e_ms?: number;
   nodes_executed?: string[];
   audioUrl?: string; // For voice output
   audioCacheKey?: string; // IndexedDB cache key for replaying audio
@@ -36,8 +39,13 @@ interface TalkResult {
   model_used?: string;
   processing_time_ms?: number;
   asr_time_ms?: number;
+  t_ret_ms?: number;
   llm_time_ms?: number;
+  t_llm_ms?: number;
+  t_ttft_ms?: number;
   tts_time_ms?: number;
+  t_tts_ms?: number;
+  t_e2e_ms?: number;
   nodes_executed?: string[];
   tts_settings: {
     tts_mode: string;
@@ -137,6 +145,15 @@ export default function DemoPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ttsCancelledRef = useRef(false);
   const sendMessageRef = useRef<(() => Promise<void>) | null>(null);
+  const lastAsrMsRef = useRef<number | undefined>(undefined);
+
+  const resolveE2E = (message: Message): number | undefined => {
+    if (message.t_e2e_ms !== undefined) return message.t_e2e_ms;
+    const parts = [message.asr_time_ms, message.t_ret_ms, message.llm_time_ms, message.tts_time_ms]
+      .filter((v): v is number => v !== undefined);
+    if (parts.length === 0) return undefined;
+    return parts.reduce((sum, v) => sum + v, 0);
+  };
 
   useEffect(() => {
     inputValueRef.current = inputValue;
@@ -276,6 +293,7 @@ export default function DemoPage() {
 
       const data = await res.json();
       const asrMs = Date.now() - asrStart;
+      lastAsrMsRef.current = asrMs;
       console.log(`Typhoon ASR took ${asrMs}ms — "${data.text}"`);
       return data.text || '';
     } catch (err) {
@@ -361,9 +379,12 @@ export default function DemoPage() {
           timestamp: new Date(),
           model_used: talkResult.model_used,
           processing_time_ms: talkResult.processing_time_ms,
-          asr_time_ms: talkResult.asr_time_ms,
-          llm_time_ms: talkResult.llm_time_ms ?? llm_time_ms,
-          tts_time_ms: talkResult.tts_time_ms,
+          asr_time_ms: talkResult.asr_time_ms ?? lastAsrMsRef.current,
+          t_ret_ms: talkResult.t_ret_ms,
+          llm_time_ms: talkResult.t_llm_ms ?? talkResult.llm_time_ms ?? llm_time_ms,
+          t_ttft_ms: talkResult.t_ttft_ms,
+          tts_time_ms: talkResult.t_tts_ms ?? talkResult.tts_time_ms,
+          t_e2e_ms: talkResult.t_e2e_ms,
           nodes_executed: talkResult.nodes_executed,
           audioCacheKey: talkResult.cache_key,
         };
@@ -408,9 +429,12 @@ export default function DemoPage() {
           timestamp: new Date(),
           model_used: data.model_used,
           processing_time_ms: data.processing_time_ms,
-          asr_time_ms: data.asr_time_ms,
-          llm_time_ms: data.llm_time_ms ?? llm_time_ms,
-          tts_time_ms: data.tts_time_ms,
+          asr_time_ms: data.asr_time_ms ?? lastAsrMsRef.current,
+          t_ret_ms: data.t_ret_ms,
+          llm_time_ms: data.t_llm_ms ?? data.llm_time_ms ?? llm_time_ms,
+          t_ttft_ms: data.t_ttft_ms,
+          tts_time_ms: data.t_tts_ms ?? data.tts_time_ms,
+          t_e2e_ms: data.t_e2e_ms,
           nodes_executed: data.nodes_executed,
         };
 
@@ -1024,6 +1048,7 @@ export default function DemoPage() {
 
   const sendMessage = useCallback(async () => {
     if (!inputValue.trim() || sending) return;
+    lastAsrMsRef.current = undefined;
 
     const userMessage: Message = {
       id: `msg-${Date.now()}-user`,
@@ -1065,8 +1090,11 @@ export default function DemoPage() {
           model_used: talkResult.model_used,
           processing_time_ms: talkResult.processing_time_ms,
           asr_time_ms: talkResult.asr_time_ms,
-          llm_time_ms: talkResult.llm_time_ms ?? llm_time_ms,
-          tts_time_ms: talkResult.tts_time_ms,
+          t_ret_ms: talkResult.t_ret_ms,
+          llm_time_ms: talkResult.t_llm_ms ?? talkResult.llm_time_ms ?? llm_time_ms,
+          t_ttft_ms: talkResult.t_ttft_ms,
+          tts_time_ms: talkResult.t_tts_ms ?? talkResult.tts_time_ms,
+          t_e2e_ms: talkResult.t_e2e_ms,
           nodes_executed: talkResult.nodes_executed,
           audioCacheKey: talkResult.cache_key,
         };
@@ -1111,8 +1139,11 @@ export default function DemoPage() {
           model_used: data.model_used,
           processing_time_ms: data.processing_time_ms,
           asr_time_ms: data.asr_time_ms,
-          llm_time_ms: data.llm_time_ms ?? llm_time_ms,
-          tts_time_ms: data.tts_time_ms,
+          t_ret_ms: data.t_ret_ms,
+          llm_time_ms: data.t_llm_ms ?? data.llm_time_ms ?? llm_time_ms,
+          t_ttft_ms: data.t_ttft_ms,
+          tts_time_ms: data.t_tts_ms ?? data.tts_time_ms,
+          t_e2e_ms: data.t_e2e_ms,
           nodes_executed: data.nodes_executed,
         };
 
@@ -1350,15 +1381,11 @@ export default function DemoPage() {
                           <span className="font-medium">Model:</span> {message.model_used}
                         </div>
                       )}
-                      {/* Total time = t_llm_ms + t_tts_ms */}
-                      {(message.llm_time_ms !== undefined || message.tts_time_ms !== undefined) && (
+                      {(resolveE2E(message) !== undefined || message.processing_time_ms !== undefined) && (
                         <div className="text-gray-600">
-                          <span className="font-medium">Total time:</span>{' '}
+                          <span className="font-medium">Time (E2E):</span>{' '}
                           <span className="text-green-700 font-semibold">
-                            {((message.llm_time_ms || 0) + (message.tts_time_ms || 0)).toFixed(1)} ms
-                            <span className="text-xs text-gray-400 ml-1">
-                              ({message.llm_time_ms?.toFixed(1) || '0.0'} + {message.tts_time_ms?.toFixed(1) || '0.0'})
-                            </span>
+                            {(resolveE2E(message) ?? message.processing_time_ms ?? 0).toFixed(1)} ms
                           </span>
                         </div>
                       )}
@@ -1368,10 +1395,22 @@ export default function DemoPage() {
                           <span className="text-blue-700 font-semibold">{message.asr_time_ms.toFixed(0)} ms</span>
                         </div>
                       )}
+                      {message.t_ret_ms !== undefined && (
+                        <div className="text-gray-600">
+                          <span className="font-medium">Time (Retriever):</span>{' '}
+                          <span className="text-emerald-700 font-semibold">{message.t_ret_ms.toFixed(0)} ms</span>
+                        </div>
+                      )}
                       {message.llm_time_ms !== undefined && (
                         <div className="text-gray-600">
                           <span className="font-medium">Time (LLM):</span>{' '}
                           <span className="text-purple-700 font-semibold">{message.llm_time_ms.toFixed(0)} ms</span>
+                        </div>
+                      )}
+                      {message.t_ttft_ms !== undefined && (
+                        <div className="text-gray-600">
+                          <span className="font-medium">Time to First Token (TTFT):</span>{' '}
+                          <span className="text-fuchsia-700 font-semibold">{message.t_ttft_ms.toFixed(0)} ms</span>
                         </div>
                       )}
                       {message.tts_time_ms !== undefined && (

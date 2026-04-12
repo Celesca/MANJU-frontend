@@ -253,6 +253,9 @@ func Talk(c *fiber.Ctx, repo *repository.ProjectRepository) error {
 			"cache_key":         cacheKey,
 			"model_used":        direct.ModelUsed,
 			"processing_time_ms": ms,
+			"t_llm_ms":          ms,
+			"t_ttft_ms":         ms,
+			"t_e2e_ms":          ms,
 			"nodes_executed":    direct.Nodes,
 			"tts_provider":      body.TTSProvider,
 			"tts_settings": fiber.Map{
