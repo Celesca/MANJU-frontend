@@ -1558,7 +1558,7 @@ export default function DemoPage() {
 
                 <button
                   onClick={() => { setInputValue(''); setInterimTranscript(''); }}
-                  className="px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200 text-sm"
+                  className="px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-800 text-sm"
                 >
                   Clear
                 </button>
