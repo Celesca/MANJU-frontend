@@ -56,16 +56,17 @@ func main() {
 		app.Use(func(c *fiber.Ctx) error {
 			uid := devID
 			if uid == "" {
-				// try to pick an existing user or create a dev user
 				userRepo := repository.New(database.Database)
-				users, err := userRepo.List()
-				if err == nil && len(users) > 0 {
-					uid = users[0].ID.String()
-				} else {
+				user, err := userRepo.GetByEmail("dev@localhost")
+				if err == nil && user != nil {
+					uid = user.ID.String()
+				} else if err == nil {
 					newUser := &repository.User{Email: "dev@localhost", Name: "Dev", Status: repository.StatusActive}
 					created, err := userRepo.Create(newUser)
 					if err == nil {
 						uid = created.ID.String()
+					} else if user, lookupErr := userRepo.GetByEmail("dev@localhost"); lookupErr == nil && user != nil {
+						uid = user.ID.String()
 					}
 				}
 			}

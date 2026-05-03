@@ -231,6 +231,36 @@ func Callback(c *fiber.Ctx) error {
 
 // Me returns the authenticated user's info based on JWT token
 func Me(c *fiber.Ctx) error {
+	if strings.ToLower(strings.TrimSpace(os.Getenv("DISABLE_AUTH"))) == "true" {
+		userID, _ := c.Locals("userID").(string)
+		if userID == "" {
+			return c.JSON(fiber.Map{
+				"id":    "dev",
+				"email": "dev@localhost",
+				"name":  "Dev",
+			})
+		}
+
+		userRepo := repository.New(database.Database)
+		user, err := userRepo.GetByID(userID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "db error"})
+		}
+		if user == nil {
+			return c.JSON(fiber.Map{
+				"id":    userID,
+				"email": "dev@localhost",
+				"name":  "Dev",
+			})
+		}
+
+		return c.JSON(fiber.Map{
+			"id":    user.ID.String(),
+			"email": user.Email,
+			"name":  user.Name,
+		})
+	}
+
 	tokenString := ExtractBearerToken(c)
 	if tokenString == "" {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "no token provided"})
