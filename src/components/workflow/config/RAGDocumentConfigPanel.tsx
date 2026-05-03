@@ -77,7 +77,14 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
     } finally {
       setEmbedding(false);
     }
-  }, [projectId, formData.documents.length]);
+  }, [
+    projectId,
+    formData.documents.length,
+    formData.embeddingModel,
+    formData.chunkSize,
+    formData.chunkOverlap,
+    formData.openaiApiKey,
+  ]);
 
   const uploadFile = useCallback(async (file: File): Promise<UploadedDocument | null> => {
     const ext = file.name.split('.').pop()?.toLowerCase() as 'pdf' | 'docx' | 'txt';
