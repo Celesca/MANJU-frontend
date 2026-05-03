@@ -52,6 +52,7 @@ services:
       - GOMEMLIMIT=${BACKEND_GOMEMLIMIT:-192MiB}
       - FRONTEND_URL=${DOCKER_FRONTEND_URL:-https://manju.limitlesstech-co.com}
       - REDIRECT_URI=${DOCKER_REDIRECT_URI:-https://manju.limitlesstech-co.com/api/auth/callback/google}
+      - DISABLE_AUTH=${DOCKER_DISABLE_AUTH:-false}
     env_file:
       - ./backend/.env
     mem_limit: ${BACKEND_MEM_LIMIT:-384m}
