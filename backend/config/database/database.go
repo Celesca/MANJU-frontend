@@ -54,9 +54,33 @@ func Connect() {
 
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=%s", dbHost, dbUser, dbPassword, dbName, dbPort, sslMode)
 
-	Database, _ = gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: newLogger,
-	})
+	// Retry connection logic with exponential backoff
+	var err error
+	maxRetries := 10
+	retryDelay := time.Second
+
+	for i := 0; i < maxRetries; i++ {
+		Database, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
+			Logger: newLogger,
+		})
+
+		if err == nil {
+			break
+		}
+
+		if i < maxRetries-1 {
+			log.Printf("Database connection attempt %d/%d failed: %v. Retrying in %v...", i+1, maxRetries, err, retryDelay)
+			time.Sleep(retryDelay)
+			// Exponential backoff (cap at 10 seconds)
+			if retryDelay < 10*time.Second {
+				retryDelay = time.Duration(float64(retryDelay) * 1.5)
+			}
+		}
+	}
+
+	if err != nil {
+		log.Fatalf("Failed to connect to database after %d attempts: %v", maxRetries, err)
+	}
 
 	// Auto-migrate core models (User, Session, Project, UserAPIKey, Voice)
 	if err := Database.AutoMigrate(&repository.User{}, &repository.Session{}, &repository.Project{}, &repository.UserAPIKey{}, &repository.Voice{}); err != nil {

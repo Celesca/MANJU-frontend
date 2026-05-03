@@ -6,6 +6,10 @@ FROM postgres:15-alpine
 # scripts in /docker-entrypoint-initdb.d when the database is first created.
 COPY ./init/ /docker-entrypoint-initdb.d/
 
+# Set proper permissions for the postgres user
+RUN chmod 755 /docker-entrypoint-initdb.d && \
+    chmod 644 /docker-entrypoint-initdb.d/*
+
 # Expose Postgres default port
 EXPOSE 5432
 
