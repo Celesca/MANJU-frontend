@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from workflow_executor import WorkflowExecutor, DocumentEmbeddingService
+from typhoon_asr import LocalTyphoonASR
 
 # Load environment variables
 load_dotenv()
@@ -37,6 +38,7 @@ executor: Optional[WorkflowExecutor] = None
 embedding_service: Optional[DocumentEmbeddingService] = None
 openai_client: Optional[OpenAI] = None
 http_client: Optional[httpx.AsyncClient] = None
+local_typhoon_asr: Optional[LocalTyphoonASR] = None
 
 # Qwen TTS service URL
 QWEN_TTS_URL = os.getenv("QWEN_TTS_URL", "http://localhost:8001")
@@ -45,7 +47,7 @@ QWEN_TTS_URL = os.getenv("QWEN_TTS_URL", "http://localhost:8001")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown events."""
-    global executor, embedding_service, openai_client, http_client
+    global executor, embedding_service, openai_client, http_client, local_typhoon_asr
     logger.info("Starting AI Workflow Service...")
     executor = WorkflowExecutor()
     embedding_service = DocumentEmbeddingService()
@@ -66,6 +68,18 @@ async def lifespan(app: FastAPI):
             logger.warning("Qwen3-TTS service returned status %s", resp.status_code)
     except Exception:
         logger.warning("Qwen3-TTS service not reachable at %s — /talk endpoints will fail", QWEN_TTS_URL)
+
+    # Initialize local Typhoon ASR model at startup to avoid first-request cold start.
+    use_local_asr = os.getenv("USE_LOCAL_TYPHOON_ASR", "true").lower() in ("1", "true", "yes")
+    if use_local_asr:
+        try:
+            local_typhoon_asr = LocalTyphoonASR(device=os.getenv("TYPHOON_ASR_DEVICE", "cpu"))
+            local_typhoon_asr.initialize()
+        except Exception:
+            local_typhoon_asr = None
+            logger.exception("Failed to initialize local Typhoon ASR model")
+    else:
+        logger.info("USE_LOCAL_TYPHOON_ASR disabled; /asr/transcribe will return empty text")
         
     yield
     logger.info("Shutting down AI Workflow Service...")
@@ -151,6 +165,12 @@ class ChatResponse(BaseModel):
     processing_time_ms: float
     nodes_executed: List[str] = Field(default_factory=list)
 
+    t_ret_ms: Optional[float] = None
+    t_llm_ms: Optional[float] = None
+    t_ttft_ms: Optional[float] = None
+    t_tts_ms: Optional[float] = None
+    t_e2e_ms: Optional[float] = None
+
 
 class HealthResponse(BaseModel):
     status: str
@@ -167,6 +187,7 @@ class WorkflowTypeResponse(BaseModel):
     has_sheets: bool
     has_condition: bool
     tts_provider: str = "openai"  # "openai" or "qwen3"
+    asr_provider: str = "web-speech"  # "web-speech" or "typhoon"
 
 
 class TTSRequest(BaseModel):
@@ -228,6 +249,12 @@ async def chat(request: ChatRequest):
             model_used=result.get("model_used"),
             processing_time_ms=processing_time,
             nodes_executed=result.get("nodes_executed", []),
+
+            t_ret_ms=result.get("t_ret_ms"),
+            t_llm_ms=result.get("t_llm_ms"),
+            t_ttft_ms=result.get("t_ttft_ms"),
+            t_tts_ms=result.get("t_tts_ms"),
+            t_e2e_ms=result.get("t_e2e_ms"),
         )
     
     except Exception as e:
@@ -301,6 +328,49 @@ async def text_to_speech(request: TTSRequest):
     except Exception as e:
         logger.exception("Error in TTS generation")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# ASR — Typhoon ASR via OpenAI-compatible API
+# =============================================================================
+
+@app.post("/asr/transcribe")
+async def asr_transcribe(file: UploadFile = File(...)):
+    """
+    Transcribe an audio file using Typhoon ASR API.
+    Requires TYPHOON_API_KEY in the environment.
+    Returns empty text if Typhoon API fails (will trigger Web Speech fallback on frontend).
+    """
+    if not local_typhoon_asr:
+        logger.warning("Local Typhoon ASR model is not initialized, returning empty transcription")
+        return {"text": ""}
+
+    try:
+        # Save uploaded file to a temp path (OpenAI client needs a file-like object)
+        suffix = "." + (file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else "wav")
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        try:
+            content = await file.read()
+            tmp.write(content)
+            tmp.flush()
+            tmp.close()
+
+            result_text = local_typhoon_asr.transcribe_file(tmp.name)
+            logger.info(f"Typhoon ASR result: {result_text[:100]}")
+            return {"text": result_text}
+        finally:
+            # Clean up temp file
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Typhoon ASR transcription failed")
+        # Return empty text instead of error to trigger Web Speech fallback on frontend
+        return {"text": ""}
 
 
 # =============================================================================
@@ -397,6 +467,12 @@ class TalkResponse(BaseModel):
     nodes_executed: List[str] = Field(default_factory=list)
     audio_url: Optional[str] = None  # Relative URL to fetch audio separately
 
+    t_ret_ms: Optional[float] = None
+    t_llm_ms: Optional[float] = None
+    t_ttft_ms: Optional[float] = None
+    t_tts_ms: Optional[float] = None
+    t_e2e_ms: Optional[float] = None
+
 
 class VoiceReferenceCache(BaseModel):
     """Cached voice reference info."""
@@ -466,6 +542,12 @@ async def talk(request: TalkRequest):
         "model_used": result.get("model_used") or "",
         "processing_time_ms": round(processing_time, 2),
         "nodes_executed": result.get("nodes_executed", []),
+
+        "t_ret_ms": result.get("t_ret_ms"),
+        "t_llm_ms": result.get("t_llm_ms"),
+        "t_ttft_ms": result.get("t_ttft_ms"),
+        "t_tts_ms": result.get("t_tts_ms"),
+        "t_e2e_ms": result.get("t_e2e_ms"),
         # tts_provider tells the frontend which pipeline to use for audio synthesis
         "tts_provider": request.tts_provider,
         "tts_settings": {
@@ -869,6 +951,10 @@ class EmbedDocumentsRequest(BaseModel):
     documents_path: str
     user_id: str
     project_id: str
+    embedding_model: Optional[str] = "text-embedding-3-small"
+    chunk_size: Optional[int] = 1000
+    chunk_overlap: Optional[int] = 200
+    openai_api_key: Optional[str] = None
 
 
 class EmbedDocumentsResponse(BaseModel):
@@ -916,6 +1002,10 @@ async def embed_documents(request: EmbedDocumentsRequest):
             documents_path=request.documents_path,
             user_id=request.user_id,
             project_id=request.project_id,
+            embedding_model=request.embedding_model,
+            chunk_size=request.chunk_size,
+            chunk_overlap=request.chunk_overlap,
+            openai_api_key=request.openai_api_key,
         )
         return EmbedDocumentsResponse(**result)
     except Exception as e:

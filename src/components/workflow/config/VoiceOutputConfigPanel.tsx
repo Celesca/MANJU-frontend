@@ -160,25 +160,6 @@ export default function VoiceOutputConfigPanel({ data, onSave, onClose }: VoiceO
     }
   };
 
-  const handleUpdateRefTranscript = async (refId: string, transcript: string) => {
-    try {
-      const fd = new FormData();
-      fd.append('ref_transcript', transcript);
-
-      await apiFetch(`${API_BASE}/api/qwen-tts/voice-references/${refId}`, {
-        method: 'PUT',
-        credentials: 'include',
-        body: fd,
-      });
-
-      setVoiceRefs(prev =>
-        prev.map(r => (r.id === refId ? { ...r, ref_transcript: transcript } : r))
-      );
-    } catch (err) {
-      console.error('Failed to update voice reference transcript:', err);
-    }
-  };
-
   const handleSave = () => {
     onSave(formData);
   };

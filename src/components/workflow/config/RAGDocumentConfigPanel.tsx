@@ -53,6 +53,7 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
           embedding_model: formData.embeddingModel,
           chunk_size: formData.chunkSize,
           chunk_overlap: formData.chunkOverlap,
+          openai_api_key: formData.openaiApiKey?.trim() || undefined,
         }),
       });
 
@@ -76,7 +77,14 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
     } finally {
       setEmbedding(false);
     }
-  }, [projectId, formData.documents.length]);
+  }, [
+    projectId,
+    formData.documents.length,
+    formData.embeddingModel,
+    formData.chunkSize,
+    formData.chunkOverlap,
+    formData.openaiApiKey,
+  ]);
 
   const uploadFile = useCallback(async (file: File): Promise<UploadedDocument | null> => {
     const ext = file.name.split('.').pop()?.toLowerCase() as 'pdf' | 'docx' | 'txt';
@@ -363,6 +371,19 @@ export default function RAGDocumentConfigPanel({ data, projectId, onSave, onClos
                 max="500"
                 value={formData.chunkOverlap}
                 onChange={(e) => setFormData({ ...formData, chunkOverlap: parseInt(e.target.value) })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-600 mb-1">
+                OpenAI API Key (optional override)
+              </label>
+              <input
+                type="password"
+                value={formData.openaiApiKey || ''}
+                onChange={(e) => setFormData({ ...formData, openaiApiKey: e.target.value })}
+                placeholder="sk-..."
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>

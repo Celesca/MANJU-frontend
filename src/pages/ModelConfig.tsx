@@ -14,6 +14,7 @@ import {
   AIModelConfigPanel,
   RAGDocumentConfigPanel,
   GoogleSheetsConfigPanel,
+  VoiceInputConfigPanel,
   VoiceOutputConfigPanel,
 } from '../components/workflow/config';
 import IfConditionConfigPanel from '../components/workflow/config/IfConditionConfigPanel';
@@ -27,6 +28,7 @@ import type {
   RAGDocumentData,
   GoogleSheetsData,
   IfConditionData,
+  VoiceInputData,
   VoiceOutputData,
 } from '../types/workflow';
 
@@ -359,6 +361,14 @@ export default function ModelConfig() {
             onClose={() => setConfigPanelNode(null)}
           />
         );
+      case 'voice-input':
+        return (
+          <VoiceInputConfigPanel
+            data={configPanelNode.data as VoiceInputData}
+            onSave={(data) => handleConfigSave(configPanelNode.id, data)}
+            onClose={() => setConfigPanelNode(null)}
+          />
+        );
       case 'voice-output':
         return (
           <VoiceOutputConfigPanel
@@ -406,7 +416,7 @@ export default function ModelConfig() {
                 setWorkflowName(e.target.value);
                 setHasUnsavedChanges(true);
               }}
-              className="text-lg font-semibold bg-transparent border-none focus:outline-none focus:ring-2 focus:ring-purple-500 rounded px-2 py-1"
+              className="text-lg font-semibold text-gray-900 bg-white border-none focus:outline-none focus:ring-2 focus:ring-purple-500 rounded px-2 py-1"
             />
             <button
               onClick={() => nameInputRef.current?.focus()}

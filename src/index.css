@@ -7,3 +7,45 @@
 @theme {
   --font-sans: "Prompt", ui-sans-serif, system-ui, sans-serif;
 }
+
+/* Global readability for text-like form controls */
+:where(
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']),
+  select,
+  textarea
+) {
+  color: #111827 !important;
+  background-color: #ffffff !important;
+}
+
+/* Improve placeholder contrast on light inputs/backgrounds */
+input::placeholder,
+textarea::placeholder,
+select::placeholder {
+  color: #4b5563;
+  opacity: 1;
+}
+
+/* Keep AI model config form fields readable regardless of theme */
+.ai-model-config-panel input,
+.ai-model-config-panel select,
+.ai-model-config-panel textarea {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+}
+
+.ai-model-config-panel input::placeholder,
+.ai-model-config-panel textarea::placeholder {
+  color: #6b7280 !important;
+  opacity: 1;
+}
+
+.ai-model-config-panel select option {
+  background-color: #ffffff;
+  color: #111827;
+}
+
+select option {
+  background-color: #ffffff;
+  color: #111827;
+}

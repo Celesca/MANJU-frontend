@@ -65,6 +65,70 @@
     ```
     เปิด Browser และไปที่ `http://localhost:5173`
 
+### Low-Memory Docker on a VM
+
+The default `docker-compose.yml` is tuned for small VMs:
+
+```bash
+docker compose up -d db backend ai_backend frontend
+```
+
+The frontend service reuses the host `node_modules` directory instead of running `npm install` inside Docker on every startup. If `frontend_1` exits with `Missing node_modules`, install dependencies once on the VM host:
+
+```bash
+npm install
+docker compose up -d frontend
+```
+
+By default, the AI backend does **not** load the local Typhoon ASR model because that model can use several GB of RAM on CPU-only VMs. The `/asr/transcribe` endpoint will return empty text unless you enable local ASR.
+
+Enable local Typhoon ASR only when the VM has enough memory:
+
+```bash
+USE_LOCAL_TYPHOON_ASR=true AI_BACKEND_MEM_LIMIT=4g AI_BACKEND_MEMSWAP_LIMIT=5g docker compose up -d ai_backend
+```
+
+For the lowest memory load, prefer browser Web Speech ASR or a remote ASR API and keep `USE_LOCAL_TYPHOON_ASR=false`.
+
+Useful VM checks:
+
+```bash
+docker stats
+free -h
+dmesg -T | grep -i "out of memory\|killed process"
+```
+
+If the VM still kills processes, add swap before starting the stack. For example, a 4 GB swap file is often enough for development VMs:
+
+```bash
+sudo fallocate -l 4G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+```
+
+If Postgres logs `password authentication failed for user "postgres"`, the existing Docker volume was probably initialized with a different password. Either set the current password when starting Compose:
+
+```bash
+DB_PASSWORD=your_existing_password docker compose up -d db backend
+```
+
+Or recreate the development database volume. This deletes the local dev database:
+
+```bash
+docker compose down
+docker volume rm manju-frontend_manju_postgres_data
+docker compose up -d db backend
+```
+
+Do not expose the development database publicly. Compose binds Postgres to `127.0.0.1:5432` so only the VM itself can connect from outside Docker. If your logs show SQL such as `CREATE FUNCTION system(...)`, treat the dev database volume as compromised and recreate it:
+
+```bash
+docker compose down --remove-orphans
+docker volume rm manju-frontend_manju_postgres_data
+docker compose up -d --build db backend frontend
+```
+
 ## 👥 The Team
 
 [cite_start]โครงงานวิศวกรรมคอมพิวเตอร์ ภาคการศึกษาที่ 1/2568 [cite: 2, 9]

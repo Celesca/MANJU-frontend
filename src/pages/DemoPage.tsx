@@ -22,8 +22,11 @@ interface Message {
   model_used?: string;
   processing_time_ms?: number;
   asr_time_ms?: number;
+  t_ret_ms?: number;
   llm_time_ms?: number;
+  t_ttft_ms?: number;
   tts_time_ms?: number;
+  t_e2e_ms?: number;
   nodes_executed?: string[];
   audioUrl?: string; // For voice output
   audioCacheKey?: string; // IndexedDB cache key for replaying audio
@@ -36,8 +39,13 @@ interface TalkResult {
   model_used?: string;
   processing_time_ms?: number;
   asr_time_ms?: number;
+  t_ret_ms?: number;
   llm_time_ms?: number;
+  t_llm_ms?: number;
+  t_ttft_ms?: number;
   tts_time_ms?: number;
+  t_tts_ms?: number;
+  t_e2e_ms?: number;
   nodes_executed?: string[];
   tts_settings: {
     tts_mode: string;
@@ -71,9 +79,21 @@ interface WorkflowType {
   has_sheets: boolean;
   has_condition: boolean;
   tts_provider?: 'openai' | 'qwen3';
+  asr_provider?: 'web-speech' | 'typhoon';
+  asr_language?: string; // e.g. "th", "th-TH", "en", "en-US"
   openai_voice?: string; // e.g. "alloy", "nova" — from voice-output node
   openai_model?: string; // e.g. "tts-1", "gpt-4o-audio-preview"
 }
+
+const resolveSpeechLang = (asrLanguage?: string): string => {
+  const raw = (asrLanguage || '').trim().toLowerCase();
+  if (!raw) return 'th-TH';
+  if (raw === 'th') return 'th-TH';
+  if (raw === 'en') return 'en-US';
+  if (raw === 'ja') return 'ja-JP';
+  if (raw === 'zh') return 'zh-CN';
+  return asrLanguage || 'th-TH';
+};
 
 export default function DemoPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -84,6 +104,7 @@ export default function DemoPage() {
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [showDebug, setShowDebug] = useState(false);
@@ -113,8 +134,46 @@ export default function DemoPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const inputValueRef = useRef('');
+  // Keep only finalized Web Speech chunks to avoid relying on async state timing.
+  const webSpeechFinalRef = useRef('');
+  const interimTranscriptRef = useRef('');
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const isRecordingRef = useRef(false);
+  const isRecognizingRef = useRef(false);
+  const vadCutoffRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ttsCancelledRef = useRef(false);
+  const sendMessageRef = useRef<(() => Promise<void>) | null>(null);
+  const lastAsrMsRef = useRef<number | undefined>(undefined);
+
+  const resolveE2E = (message: Message): number | undefined => {
+    if (message.t_e2e_ms !== undefined) return message.t_e2e_ms;
+    const parts = [message.asr_time_ms, message.t_ret_ms, message.llm_time_ms, message.tts_time_ms]
+      .filter((v): v is number => v !== undefined);
+    if (parts.length === 0) return undefined;
+    return parts.reduce((sum, v) => sum + v, 0);
+  };
+
+  useEffect(() => {
+    inputValueRef.current = inputValue;
+  }, [inputValue]);
+
+  useEffect(() => {
+    interimTranscriptRef.current = interimTranscript;
+  }, [interimTranscript]);
+
+  useEffect(() => {
+    mediaRecorderRef.current = mediaRecorder;
+  }, [mediaRecorder]);
+
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
+
+  useEffect(() => {
+    isRecognizingRef.current = isRecognizing;
+  }, [isRecognizing]);
 
   // Load project and validate on mount
   useEffect(() => {
@@ -186,23 +245,111 @@ export default function DemoPage() {
     }
   }, [loading]);
 
+  // Typhoon ASR: send audio blob to backend for transcription
+  const transcribeWithTyphoon = useCallback(async (audioBlob: Blob): Promise<string | null> => {
+    const mime = (audioBlob.type || '').toLowerCase();
+    const ext = mime.includes('wav')
+      ? 'wav'
+      : mime.includes('flac')
+        ? 'flac'
+        : mime.includes('mpeg') || mime.includes('mp3')
+          ? 'mp3'
+          : mime.includes('ogg')
+            ? 'ogg'
+            : mime.includes('opus')
+              ? 'opus'
+              : mime.includes('webm')
+                ? 'webm'
+                : 'wav';
+
+    console.log('Sending Typhoon ASR audio:', {
+      size: audioBlob.size,
+      type: audioBlob.type,
+      ext,
+    });
+
+    if (audioBlob.size > 4.5 * 1024 * 1024) {
+      console.warn('Typhoon payload too large:', audioBlob.size);
+      return null;
+    }
+
+    const formData = new FormData();
+    formData.append('file', audioBlob, `recording.${ext}`);
+
+    const asrStart = Date.now();
+    setIsTranscribing(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/asr/transcribe`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.warn(`Typhoon ASR failed (${res.status}): ${err.error || 'Unknown error'}`);
+        return null; // Return null to signal failure for fallback
+      }
+
+      const data = await res.json();
+      const asrMs = Date.now() - asrStart;
+      lastAsrMsRef.current = asrMs;
+      console.log(`Typhoon ASR took ${asrMs}ms — "${data.text}"`);
+      return data.text || '';
+    } catch (err) {
+      console.warn('Typhoon ASR transcription error:', err);
+      return null; // Return null to signal failure for fallback
+    } finally {
+      setIsTranscribing(false);
+    }
+  }, [projectId]);
+
   // Voice recording functions
-  const handleVoiceInput = useCallback(async (_audioBlob: Blob) => {
-    // avoid unused param lint
-    void _audioBlob;
-    // For demo, we'll use a placeholder transcription
-    // In production, this would call a speech-to-text API
-    const mockTranscription = "[Voice message received]";
+  const handleVoiceInput = useCallback(async (audioBlob: Blob, sendImmediately = true) => {
+    if (!audioBlob || audioBlob.size < 512) {
+      setError('Audio capture is too short or empty. Please hold the mic longer and try again.');
+      return;
+    }
+
+    let transcription: string = '';
+
+    // Try Typhoon ASR if configured, with fallback to Web Speech
+    if (workflowType?.asr_provider === 'typhoon') {
+      console.log('Attempting Typhoon ASR transcription...');
+      const result = await transcribeWithTyphoon(audioBlob);
+      if (result && result.trim()) {
+        transcription = result;
+      } else {
+        console.warn('Typhoon ASR failed or returned empty, skipping audio transcription');
+      }
+    }
+
+    // If no transcription yet, require inputValue from Web Speech or manual entry
+    if (!transcription.trim() && !inputValue.trim()) {
+      setError('No speech detected or transcription available. Please try again or use text input.');
+      return;
+    }
+
+    // Use transcription if available, otherwise use inputValue from Web Speech/manual
+    const finalText = transcription.trim() || inputValue.trim();
+    if (!finalText) return;
+
+    if (!sendImmediately) {
+      setInputValue(finalText);
+      setError(null);
+      return;
+    }
 
     // Create user message
     const userMessage: Message = {
       id: `msg-${Date.now()}-user`,
       role: 'user',
-      content: mockTranscription,
+      content: finalText,
       timestamp: new Date(),
     };
 
     setMessages(prev => [...prev, userMessage]);
+    setInputValue(''); // Clear input after sending
     setSending(true);
     setError(null);
 
@@ -219,7 +366,7 @@ export default function DemoPage() {
       if (isQwen3Voice) {
         // Qwen3 TTS path — workflow → sentences → pipeline playback
         const llmStart = Date.now();
-        const talkResult = await callTalkEndpoint(mockTranscription, conversationHistory);
+        const talkResult = await callTalkEndpoint(userMessage.content, conversationHistory);
         const llm_time_ms = Date.now() - llmStart;
         if (!talkResult) {
           throw new Error('Failed to get voice response from Qwen3 TTS');
@@ -232,9 +379,12 @@ export default function DemoPage() {
           timestamp: new Date(),
           model_used: talkResult.model_used,
           processing_time_ms: talkResult.processing_time_ms,
-          asr_time_ms: talkResult.asr_time_ms,
-          llm_time_ms: talkResult.llm_time_ms ?? llm_time_ms,
-          tts_time_ms: talkResult.tts_time_ms,
+          asr_time_ms: talkResult.asr_time_ms ?? lastAsrMsRef.current,
+          t_ret_ms: talkResult.t_ret_ms,
+          llm_time_ms: talkResult.t_llm_ms ?? talkResult.llm_time_ms ?? llm_time_ms,
+          t_ttft_ms: talkResult.t_ttft_ms,
+          tts_time_ms: talkResult.t_tts_ms ?? talkResult.tts_time_ms,
+          t_e2e_ms: talkResult.t_e2e_ms,
           nodes_executed: talkResult.nodes_executed,
           audioCacheKey: talkResult.cache_key,
         };
@@ -257,7 +407,7 @@ export default function DemoPage() {
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
-            message: mockTranscription,
+            message: userMessage.content,
             conversation_history: conversationHistory,
             session_id: projectId,
             is_voice_input: true,
@@ -279,9 +429,12 @@ export default function DemoPage() {
           timestamp: new Date(),
           model_used: data.model_used,
           processing_time_ms: data.processing_time_ms,
-          asr_time_ms: data.asr_time_ms,
-          llm_time_ms: data.llm_time_ms ?? llm_time_ms,
-          tts_time_ms: data.tts_time_ms,
+          asr_time_ms: data.asr_time_ms ?? lastAsrMsRef.current,
+          t_ret_ms: data.t_ret_ms,
+          llm_time_ms: data.t_llm_ms ?? data.llm_time_ms ?? llm_time_ms,
+          t_ttft_ms: data.t_ttft_ms,
+          tts_time_ms: data.t_tts_ms ?? data.tts_time_ms,
+          t_e2e_ms: data.t_e2e_ms,
           nodes_executed: data.nodes_executed,
         };
 
@@ -300,7 +453,7 @@ export default function DemoPage() {
     } finally {
       setSending(false);
     }
-  }, [messages, projectId, workflowType]);
+  }, [messages, projectId, workflowType, inputValue]);
 
   // VAD helpers
   const startVADMonitoring = useCallback(async (stream?: MediaStream) => {
@@ -342,17 +495,58 @@ export default function DemoPage() {
             // start silence timer to finalize
             if (!vadSilenceTimerRef.current) {
               vadSilenceTimerRef.current = window.setTimeout(() => {
-                // silence detected after speech -> auto send
-                // append interim transcript then send
-                if (interimTranscript.trim()) {
-                  setInputValue(prev => (prev ? prev + ' ' + interimTranscript : interimTranscript));
+                // Silence cutoff: commit transcript to input and stop mic.
+                const committed = [
+                  inputValueRef.current,
+                  webSpeechFinalRef.current,
+                  interimTranscriptRef.current,
+                ].filter(Boolean).join(' ').trim().replace(/\s+/g, ' ');
+
+                if (committed) {
+                  setInputValue(committed);
                   setInterimTranscript('');
+                  webSpeechFinalRef.current = committed;
                 }
-                // only send if there's something to send
-                if (inputRef.current && inputRef.current.value.trim()) {
-                  sendMessage();
-                } else if (inputValue.trim()) {
-                  sendMessage();
+
+                // Stop Web Speech mic path
+                if (isRecognizingRef.current && recognitionRef.current) {
+                  try {
+                    vadCutoffRef.current = true;
+                    recognitionRef.current._shouldRestart = false;
+                    recognitionRef.current.stop();
+                  } catch (err) {
+                    console.warn('SpeechRecognition stop on VAD failed', err);
+                  }
+                  setIsRecognizing(false);
+                }
+
+                // Stop Typhoon recording path; onstop will transcribe.
+                if (isRecordingRef.current && mediaRecorderRef.current) {
+                  try { mediaRecorderRef.current.requestData(); } catch (err) { console.warn('requestData failed', err); }
+                  vadCutoffRef.current = true;
+                  try { mediaRecorderRef.current.stop(); } catch (err) { console.warn('MediaRecorder stop on VAD failed', err); }
+                  setIsRecording(false);
+                }
+
+                if (vadRafRef.current) {
+                  window.cancelAnimationFrame(vadRafRef.current);
+                  vadRafRef.current = null;
+                }
+                if (vadSilenceTimerRef.current) {
+                  window.clearTimeout(vadSilenceTimerRef.current);
+                  vadSilenceTimerRef.current = null;
+                }
+                if (vadAnalyserRef.current) {
+                  try { vadAnalyserRef.current.disconnect(); } catch (e) { console.warn(e); }
+                  vadAnalyserRef.current = null;
+                }
+                if (audioContextRef.current) {
+                  try { audioContextRef.current.close(); } catch (e) { console.warn(e); }
+                  audioContextRef.current = null;
+                }
+                if (vadMediaStreamRef.current) {
+                  try { vadMediaStreamRef.current.getTracks().forEach(t => t.stop()); } catch (e) { console.warn(e); }
+                  vadMediaStreamRef.current = null;
                 }
                 vadSpeakingRef.current = false;
                 vadSilenceTimerRef.current = null;
@@ -369,7 +563,7 @@ export default function DemoPage() {
       console.warn('VAD start failed', err);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inputValue, interimTranscript, VAD_SILENCE_MS, VAD_THRESHOLD]);
+  }, [VAD_SILENCE_MS, VAD_THRESHOLD]);
 
   const stopVADMonitoring = useCallback(() => {
     if (vadRafRef.current) {
@@ -403,10 +597,11 @@ export default function DemoPage() {
 
     try {
       const recog = new SpeechRecognition();
-      recog.continuous = true;
-      recog.interimResults = true;
-      // default language (use Thai per example). You can make this configurable later.
-      recog.lang = 'th-TH';
+      recog.continuous = false; // Stop naturally when user stops speaking
+      recog.interimResults = true; // Real-time interim results
+      // Always respect workflow-configured language first.
+      recog.lang = resolveSpeechLang(workflowType?.asr_language);
+      recog.maxAlternatives = 1;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       recog.onresult = (ev: any) => {
@@ -423,9 +618,33 @@ export default function DemoPage() {
 
         // Append final transcript to the input value and keep interim separately
         if (finalTranscript) {
-          setInputValue(prev => (prev ? prev + ' ' + finalTranscript : finalTranscript));
+          const nextFinal = webSpeechFinalRef.current
+            ? `${webSpeechFinalRef.current} ${finalTranscript}`.trim()
+            : finalTranscript.trim();
+          webSpeechFinalRef.current = nextFinal;
+          setInputValue(nextFinal);
         }
         setInterimTranscript(interim);
+        if (interim) {
+          console.log('Web Speech interim:', interim);
+        }
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      recog.onerror = (ev: any) => {
+        console.warn('Web Speech error:', ev?.error || ev);
+        if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
+          setError('Microphone permission denied for Web Speech. Please allow mic access in browser settings.');
+        } else if (ev?.error === 'no-speech') {
+          setError('No speech detected. Please speak closer to the microphone and try again.');
+        } else {
+          setError(`Web Speech error: ${ev?.error || 'unknown'}`);
+        }
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      recog.onnomatch = (_ev: any) => {
+        console.warn('Web Speech: no match');
       };
 
       recog.onend = () => {
@@ -437,6 +656,22 @@ export default function DemoPage() {
           setInterimTranscript('');
           // stop VAD monitoring when recognition naturally ends
           try { stopVADMonitoring(); } catch (err) { console.warn(err); }
+          // Automatically send message if we have accumulated text from Web Speech
+          const finalText =
+            webSpeechFinalRef.current.trim() ||
+            inputValueRef.current.trim() ||
+            interimTranscriptRef.current.trim();
+          if (finalText && !vadCutoffRef.current) {
+            console.log('Web Speech ended with text:', finalText);
+            setInputValue(finalText);
+            setTimeout(() => {
+              if (sendMessageRef.current) {
+                void sendMessageRef.current();
+              }
+            }, 120);
+          }
+          vadCutoffRef.current = false;
+          webSpeechFinalRef.current = '';
         }
       };
 
@@ -445,55 +680,68 @@ export default function DemoPage() {
       console.warn('SpeechRecognition init failed', err);
       recognitionRef.current = null;
     }
-  }, [stopVADMonitoring]);
+  }, [stopVADMonitoring, workflowType?.asr_language]);
 
 
 
   const startRecording = useCallback(async () => {
-    // If Web Speech API is available, use it for real-time recognition
-    if (recognitionRef.current) {
+    const useTyphoon = workflowType?.asr_provider === 'typhoon';
+    setError(null);
+
+    // Typhoon mode: always record audio and call backend ASR.
+    if (useTyphoon) {
       try {
-        recognitionRef.current._shouldRestart = true;
-        recognitionRef.current.start();
-        setIsRecognizing(true);
-        // start VAD monitoring (separate mic stream) to detect silence
-        try { await startVADMonitoring(); } catch (err) { console.warn('VAD start failed', err); }
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const recorder = new MediaRecorder(stream);
+        try { await startVADMonitoring(stream); } catch (err) { console.warn('VAD start failed', err); }
+        const chunks: Blob[] = [];
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            chunks.push(e.data);
+          }
+        };
+
+        recorder.onstop = async () => {
+          const chosenType = recorder.mimeType || 'audio/webm';
+          const audioBlob = new Blob(chunks, { type: chosenType });
+          console.log('Typhoon recorded chunks:', chunks.length, 'blob size:', audioBlob.size, 'type:', chosenType);
+          const sendImmediately = !vadCutoffRef.current;
+          vadCutoffRef.current = false;
+          await handleVoiceInput(audioBlob, sendImmediately);
+          stream.getTracks().forEach(track => track.stop());
+        };
+
+        setMediaRecorder(recorder);
+        recorder.start(250);
+        setIsRecording(true);
+        console.log('Typhoon recording started (will call ai_backend on stop)');
         return;
       } catch (err) {
-        console.warn('SpeechRecognition start failed', err);
+        setError('Failed to access microphone. Please allow microphone access.');
+        console.error('Microphone error:', err);
+        return;
       }
     }
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      // start VAD monitoring based on the same stream (so we can auto-stop on silence)
-      try { await startVADMonitoring(stream); } catch (err) { console.warn('VAD start failed', err); }
-      const chunks: Blob[] = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunks.push(e.data);
-        }
-      };
-
-      recorder.onstop = async () => {
-        const audioBlob = new Blob(chunks, { type: 'audio/webm' });
-
-        // Convert to text using Web Speech API or send to backend for transcription
-        await handleVoiceInput(audioBlob);
-
-        // Stop all tracks
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      setMediaRecorder(recorder);
-      recorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      setError('Failed to access microphone. Please allow microphone access.');
-      console.error('Microphone error:', err);
+    // Web Speech mode (browser built-in, real-time)
+    if (recognitionRef.current) {
+      try {
+        webSpeechFinalRef.current = '';
+        setInputValue('');
+        setInterimTranscript('');
+        recognitionRef.current._shouldRestart = true;
+        recognitionRef.current.start();
+        setIsRecognizing(true);
+        console.log('Web Speech Recognition started');
+        return;
+      } catch (err) {
+        console.warn('SpeechRecognition start failed:', err);
+        setError('Failed to start Web Speech. Trying microphone fallback...');
+      }
     }
+
+    setError('Web Speech recognition is not supported in this browser. Use Chrome/Edge or switch ASR provider to Typhoon.');
   }, [handleVoiceInput, startVADMonitoring]);
 
   const stopRecording = useCallback(() => {
@@ -502,6 +750,7 @@ export default function DemoPage() {
       try {
         recognitionRef.current._shouldRestart = false;
         recognitionRef.current.stop();
+        console.log('Web Speech stopped, final input value:', inputValue);
       } catch (err) {
         console.warn('SpeechRecognition stop failed', err);
       }
@@ -512,11 +761,12 @@ export default function DemoPage() {
     }
 
     if (mediaRecorder && isRecording) {
+      try { mediaRecorder.requestData(); } catch (err) { console.warn('requestData failed', err); }
       mediaRecorder.stop();
       setIsRecording(false);
       try { stopVADMonitoring(); } catch (err) { console.warn(err); }
     }
-  }, [mediaRecorder, isRecording, isRecognizing, stopVADMonitoring]);
+  }, [mediaRecorder, isRecording, isRecognizing, stopVADMonitoring, inputValue]);
 
   // Text-to-speech for voice output using backend OpenAI TTS
   const speakResponse = async (text: string, messageId?: string) => {
@@ -549,7 +799,7 @@ export default function DemoPage() {
       // Cache the blob and record timing so download + verbose work
       if (messageId) {
         const cacheKey = `openai-tts-${messageId}`;
-        await setCachedAudio(cacheKey, blob).catch(() => {});
+        await setCachedAudio(cacheKey, blob).catch(() => { });
         setMessages(prev => prev.map(m => m.id === messageId ? { ...m, audioCacheKey: cacheKey, tts_time_ms } : m));
       }
 
@@ -733,7 +983,7 @@ export default function DemoPage() {
 
     // Store in cache for next time
     if (message.audioCacheKey) {
-      await setCachedAudio(message.audioCacheKey, blob).catch(() => {});
+      await setCachedAudio(message.audioCacheKey, blob).catch(() => { });
     }
     await playBlobAsync(blob);
   };
@@ -798,6 +1048,7 @@ export default function DemoPage() {
 
   const sendMessage = useCallback(async () => {
     if (!inputValue.trim() || sending) return;
+    lastAsrMsRef.current = undefined;
 
     const userMessage: Message = {
       id: `msg-${Date.now()}-user`,
@@ -839,8 +1090,11 @@ export default function DemoPage() {
           model_used: talkResult.model_used,
           processing_time_ms: talkResult.processing_time_ms,
           asr_time_ms: talkResult.asr_time_ms,
-          llm_time_ms: talkResult.llm_time_ms ?? llm_time_ms,
-          tts_time_ms: talkResult.tts_time_ms,
+          t_ret_ms: talkResult.t_ret_ms,
+          llm_time_ms: talkResult.t_llm_ms ?? talkResult.llm_time_ms ?? llm_time_ms,
+          t_ttft_ms: talkResult.t_ttft_ms,
+          tts_time_ms: talkResult.t_tts_ms ?? talkResult.tts_time_ms,
+          t_e2e_ms: talkResult.t_e2e_ms,
           nodes_executed: talkResult.nodes_executed,
           audioCacheKey: talkResult.cache_key,
         };
@@ -885,8 +1139,11 @@ export default function DemoPage() {
           model_used: data.model_used,
           processing_time_ms: data.processing_time_ms,
           asr_time_ms: data.asr_time_ms,
-          llm_time_ms: data.llm_time_ms ?? llm_time_ms,
-          tts_time_ms: data.tts_time_ms,
+          t_ret_ms: data.t_ret_ms,
+          llm_time_ms: data.t_llm_ms ?? data.llm_time_ms ?? llm_time_ms,
+          t_ttft_ms: data.t_ttft_ms,
+          tts_time_ms: data.t_tts_ms ?? data.tts_time_ms,
+          t_e2e_ms: data.t_e2e_ms,
           nodes_executed: data.nodes_executed,
         };
 
@@ -909,6 +1166,10 @@ export default function DemoPage() {
       inputRef.current?.focus();
     }
   }, [inputValue, messages, projectId, workflowType, sending]);
+
+  useEffect(() => {
+    sendMessageRef.current = sendMessage;
+  }, [sendMessage]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -959,9 +1220,8 @@ export default function DemoPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setVerbose(v => !v)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                verbose ? 'bg-green-100 text-green-700' : 'text-gray-500 hover:bg-gray-100'
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${verbose ? 'bg-green-100 text-green-700' : 'text-gray-500 hover:bg-gray-100'
+                }`}
               title="Toggle verbose execution info"
             >
               <Activity className="w-4 h-4" />
@@ -1121,10 +1381,12 @@ export default function DemoPage() {
                           <span className="font-medium">Model:</span> {message.model_used}
                         </div>
                       )}
-                      {message.processing_time_ms !== undefined && (
+                      {(resolveE2E(message) !== undefined || message.processing_time_ms !== undefined) && (
                         <div className="text-gray-600">
-                          <span className="font-medium">Total time:</span>{' '}
-                          <span className="text-green-700 font-semibold">{message.processing_time_ms.toFixed(0)} ms</span>
+                          <span className="font-medium">Time (E2E):</span>{' '}
+                          <span className="text-green-700 font-semibold">
+                            {(resolveE2E(message) ?? message.processing_time_ms ?? 0).toFixed(1)} ms
+                          </span>
                         </div>
                       )}
                       {message.asr_time_ms !== undefined && (
@@ -1133,10 +1395,22 @@ export default function DemoPage() {
                           <span className="text-blue-700 font-semibold">{message.asr_time_ms.toFixed(0)} ms</span>
                         </div>
                       )}
+                      {message.t_ret_ms !== undefined && (
+                        <div className="text-gray-600">
+                          <span className="font-medium">Time (Retriever):</span>{' '}
+                          <span className="text-emerald-700 font-semibold">{message.t_ret_ms.toFixed(0)} ms</span>
+                        </div>
+                      )}
                       {message.llm_time_ms !== undefined && (
                         <div className="text-gray-600">
                           <span className="font-medium">Time (LLM):</span>{' '}
                           <span className="text-purple-700 font-semibold">{message.llm_time_ms.toFixed(0)} ms</span>
+                        </div>
+                      )}
+                      {message.t_ttft_ms !== undefined && (
+                        <div className="text-gray-600">
+                          <span className="font-medium">Time to First Token (TTFT):</span>{' '}
+                          <span className="text-fuchsia-700 font-semibold">{message.t_ttft_ms.toFixed(0)} ms</span>
                         </div>
                       )}
                       {message.tts_time_ms !== undefined && (
@@ -1154,6 +1428,12 @@ export default function DemoPage() {
                               {i < message.nodes_executed!.length - 1 && <span className="mx-1 text-green-400">→</span>}
                             </span>
                           ))}
+                        </div>
+                      )}
+                      {workflowType?.input_type === 'voice' && (
+                        <div className="text-gray-600">
+                          <span className="font-medium">ASR provider:</span>{' '}
+                          {workflowType.asr_provider === 'typhoon' ? 'Typhoon ASR' : 'Web Speech API'}
                         </div>
                       )}
                       {workflowType?.output_type === 'voice' && (
@@ -1237,7 +1517,9 @@ export default function DemoPage() {
                 ? 'bg-blue-100 text-blue-700'
                 : 'bg-gray-100 text-gray-600'
                 }`}>
-                {workflowType.input_type === 'voice' ? '🎤 Voice Input' : '⌨️ Text Input'}
+                {workflowType.input_type === 'voice'
+                  ? `🎤 Voice Input (${workflowType.asr_provider === 'typhoon' ? 'Typhoon' : 'Web Speech'})`
+                  : '⌨️ Text Input'}
               </span>
               <span className="text-gray-400">→</span>
               <span className={`px-2 py-0.5 text-xs rounded-full ${workflowType.output_type === 'voice'
@@ -1257,7 +1539,7 @@ export default function DemoPage() {
               <div className="flex items-center gap-3">
                 <motion.button
                   onClick={(isRecognizing || isRecording) ? stopRecording : startRecording}
-                  disabled={sending}
+                  disabled={sending || isTranscribing}
                   className={`p-6 rounded-full transition-all ${(isRecognizing || isRecording)
                     ? 'bg-red-500 hover:bg-red-600 animate-pulse'
                     : 'bg-purple-600 hover:bg-purple-700'
@@ -1265,7 +1547,7 @@ export default function DemoPage() {
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >
-                  {sending ? (
+                  {sending || isTranscribing ? (
                     <Loader2 className="w-8 h-8 animate-spin" />
                   ) : (isRecognizing || isRecording) ? (
                     <Square className="w-8 h-8" />
@@ -1276,14 +1558,18 @@ export default function DemoPage() {
 
                 <button
                   onClick={() => { setInputValue(''); setInterimTranscript(''); }}
-                  className="px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200 text-sm"
+                  className="px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-800 text-sm"
                 >
                   Clear
                 </button>
               </div>
 
               <p className="text-sm text-gray-500">
-                {(isRecognizing || isRecording) ? 'Recording... Click to stop' : 'Click to start recording'}
+                {isTranscribing
+                  ? 'Transcribing audio... Please wait'
+                  : (isRecognizing || isRecording)
+                    ? 'Recording... Click to stop'
+                    : 'Click to start recording'}
               </p>
 
               {/* Interim transcript (live) */}
@@ -1300,12 +1586,12 @@ export default function DemoPage() {
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Or type your message..."
-                  disabled={sending || isRecording}
+                  disabled={sending || isRecording || isTranscribing}
                   className="flex-1 px-4 py-2 bg-gray-100 border border-gray-200 rounded-xl text-gray-800 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:opacity-50"
                 />
                 <motion.button
                   onClick={sendMessage}
-                  disabled={!inputValue.trim() || sending || isRecording}
+                  disabled={!inputValue.trim() || sending || isRecording || isTranscribing}
                   className="p-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}

@@ -120,7 +120,7 @@ export default function AIModelConfigPanel({ data, onSave, onClose }: AIModelCon
       initial={{ opacity: 0, x: 300 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 300 }}
-      className="w-96 bg-white border-l border-gray-200 h-full overflow-y-auto shadow-lg"
+      className="ai-model-config-panel w-96 bg-white border-l border-gray-200 h-full overflow-y-auto shadow-lg"
     >
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-purple-50">

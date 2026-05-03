@@ -26,6 +26,13 @@ type DocumentInfo struct {
 	FilePath   string    `json:"filePath,omitempty"`
 }
 
+type EmbedDocumentsConfig struct {
+	EmbeddingModel string `json:"embedding_model"`
+	ChunkSize      int    `json:"chunk_size"`
+	ChunkOverlap   int    `json:"chunk_overlap"`
+	OpenAIAPIKey   string `json:"openai_api_key"`
+}
+
 // getDocumentsStoragePath returns the base path for document storage
 func getDocumentsStoragePath() string {
 	path := os.Getenv("DOCUMENTS_STORAGE_PATH")
@@ -47,14 +54,14 @@ func ensureUserDocumentDir(userID, projectID string) (string, error) {
 	return userPath, nil
 }
 
-// triggerEmbedding calls the AI service to embed documents
-func triggerEmbedding(userID, projectID, documentsPath string) error {
+// triggerEmbedding calls the AI service to embed documents and returns the response
+func triggerEmbedding(userID, projectID, documentsPath string, cfg EmbedDocumentsConfig) (map[string]interface{}, error) {
 	aiServiceURL := getAIServiceURL()
 
 	// Get absolute path
 	absPath, err := filepath.Abs(documentsPath)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to resolve path: %w", err)
 	}
 
 	// Create request body
@@ -63,25 +70,61 @@ func triggerEmbedding(userID, projectID, documentsPath string) error {
 		"user_id":        userID,
 		"project_id":     projectID,
 	}
+	if cfg.EmbeddingModel != "" {
+		reqBody["embedding_model"] = cfg.EmbeddingModel
+	}
+	if cfg.OpenAIAPIKey != "" {
+		reqBody["openai_api_key"] = cfg.OpenAIAPIKey
+	}
+
+	if cfg.ChunkSize > 0 {
+		reqBody["chunk_size"] = fmt.Sprintf("%d", cfg.ChunkSize)
+	}
+	if cfg.ChunkOverlap >= 0 {
+		reqBody["chunk_overlap"] = fmt.Sprintf("%d", cfg.ChunkOverlap)
+	}
 	jsonBody, _ := json.Marshal(reqBody)
 
-	// Make request to AI service
-	resp, err := http.Post(
+	// Make authenticated request to AI service
+	client := &http.Client{Timeout: 120 * time.Second}
+	req, err := http.NewRequest(
+		http.MethodPost,
 		aiServiceURL+"/embed-documents",
-		"application/json",
 		bytes.NewBuffer(jsonBody),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to call AI service: %w", err)
+		return nil, fmt.Errorf("failed to create embedding request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if apiKey := os.Getenv("MANJU_API_KEY"); apiKey != "" {
+		req.Header.Set("X-API-Key", apiKey)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("AI service unreachable at %s: %w", aiServiceURL, err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("AI service error: %s", string(body))
+	body, _ := io.ReadAll(resp.Body)
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("invalid response from AI service: %s", string(body))
 	}
 
-	return nil
+	if resp.StatusCode != http.StatusOK {
+		// FastAPI returns errors in "detail" field
+		if detail, ok := result["detail"].(string); ok {
+			return nil, fmt.Errorf("%s", detail)
+		}
+		if errMsg, ok := result["error"].(string); ok {
+			return nil, fmt.Errorf("%s", errMsg)
+		}
+		return nil, fmt.Errorf("AI service returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	return result, nil
 }
 
 // EmbedProjectDocuments triggers embedding for all documents in a project
@@ -114,18 +157,34 @@ func EmbedProjectDocuments(c *fiber.Ctx, repo *repository.ProjectRepository) err
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// Trigger embedding
-	if err := triggerEmbedding(userIDStr.(string), projectID, docDir); err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
-			"error":   "embedding failed",
-			"details": err.Error(),
+	// Check that the directory actually has files
+	entries, readErr := os.ReadDir(docDir)
+	if readErr != nil || len(entries) == 0 {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "No documents found. Please upload documents first.",
 		})
 	}
 
-	return c.JSON(fiber.Map{
-		"success": true,
-		"message": "Documents embedded successfully",
-	})
+	var cfg EmbedDocumentsConfig
+	_ = c.BodyParser(&cfg)
+
+	// Trigger embedding
+	result, err := triggerEmbedding(userIDStr.(string), projectID, docDir, cfg)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	// Return the AI service response (includes documents_count, chunks_count, etc.)
+	result["success"] = true
+	if result["message"] == nil {
+		docsCount := result["documents_count"]
+		chunksCount := result["chunks_count"]
+		result["message"] = fmt.Sprintf("Successfully embedded %v documents (%v chunks)", docsCount, chunksCount)
+	}
+
+	return c.JSON(result)
 }
 
 // UploadDocument handles document upload for a project
